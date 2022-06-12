@@ -7,7 +7,7 @@ use nom::character::complete::multispace0;
 use nom::character::complete::{alpha1, multispace1};
 use nom::combinator::recognize;
 use nom::error::ParseError;
-use nom::multi::many0_count;
+use nom::multi::{fold_many1, many0_count};
 use nom::sequence::delimited;
 use nom::sequence::pair;
 use nom::IResult;
@@ -23,10 +23,10 @@ type Input<'a> = &'a str;
 #[tracing::instrument]
 pub fn term(input: Input<'_>) -> ParseResult<'_, Term> {
     ws(alt((
-        parenthesized(term),
-        application.map(From::from),
         abstraction.map(From::from),
+        application.map(From::from),
         variable.map(From::from),
+        parenthesized(term),
     )))(input)
 }
 
@@ -60,8 +60,8 @@ where
 #[tracing::instrument]
 pub fn atomic_term(input: Input<'_>) -> ParseResult<'_, Term> {
     ws(alt((
-        parenthesized(application).map(From::from),
         parenthesized(abstraction).map(From::from),
+        parenthesized(application).map(From::from),
         variable.map(From::from),
     )))(input)
 }
@@ -105,17 +105,21 @@ pub fn abstraction(input: Input<'_>) -> ParseResult<'_, Abstraction> {
 
 #[tracing::instrument]
 pub fn application(input: Input<'_>) -> ParseResult<'_, Application> {
-    let (rest, apply) = atomic_term(input)?;
-    tracing::trace!(?apply);
-    let (rest, arg) = term(rest)?;
-    tracing::trace!(?arg);
-    Ok((
-        rest,
-        Application {
-            apply: Box::new(apply),
-            arg: Box::new(arg),
+    let (rest, first) = atomic_term(input)?;
+    let (rest, apply) = fold_many1(
+        atomic_term,
+        || first.clone(),
+        |acc, curr| {
+            Term::Application(Application {
+                apply: Box::new(acc),
+                arg: Box::new(curr),
+            })
         },
-    ))
+    )(rest)?;
+    match apply {
+        Term::Application(app) => Ok((rest, app)),
+        _ => unreachable!(),
+    }
 }
 
 #[tracing::instrument]
@@ -180,6 +184,7 @@ mod tests {
         };
     }
 
+    #[allow(dead_code)]
     fn init_tracing() -> DefaultGuard {
         let subscriber = Registry::default()
             .with(EnvFilter::from_env("RUST_LOG"))
@@ -230,7 +235,7 @@ mod tests {
     #[test]
     fn application_works() {
         assert_parses! {
-            application("(λx. x) y")     => Ok(("", app!(abs!(x -> var!(x)), var!(y)))),
+            application("(λx. x) y")     => Ok(("", app!(abs!(x -> var!(x)), var!(y)).into())),
             application("λx. x y")       => Err(()),
         }
     }
@@ -240,16 +245,16 @@ mod tests {
         assert_parses! {
             term("λx. x")                => Ok(("", abs!(x -> var!(x)).into())),
             term("(λx. x) y")            => Ok(("", app!(abs!(x -> var!(x)), var!(y)).into())),
-            term("(λx. x) y z")          => Ok(("", app!(abs!(x -> var!(x)), app!(var!(y), var!(z))).into())),
+            term("(λx. x) y z")          => Ok(("", app!(app!(abs!(x -> var!(x)), var!(y)), var!(z)).into())),
             term("((λx. x) y) z")        => Ok(("", app!(app!(abs!(x -> var!(x)), var!(y)), var!(z)).into())),
         }
     }
 
     #[test]
     fn application_is_left_associative() {
-        let _s = init_tracing();
         assert_parses! {
-            application("s t u") => Ok(("", app!(app!(var!(s), var!(t)), var!(u)))),
+            application("s t u") => Ok(("", app!(app!(var!(s), var!(t)), var!(u)).into())),
+            // application
         }
     }
 
