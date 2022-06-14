@@ -66,14 +66,6 @@ pub fn atomic_term(input: Input<'_>) -> ParseResult<'_, Term> {
     )))(input)
 }
 
-// fn app_term(input: Input<'_>) -> ParseResult<'_, Term> {
-//     ws(alt(
-//         variable.map(From::from),
-//         application.map(From::from),
-//         abstraction.map(From::from),
-//     ))(input)
-// }
-
 #[tracing::instrument]
 pub fn abstraction(input: Input<'_>) -> ParseResult<'_, Abstraction> {
     let arg = variable;
