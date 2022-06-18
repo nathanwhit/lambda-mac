@@ -1,5 +1,4 @@
-use crate::ast::{Abstraction, Application, Variable};
-use crate::ast::{Ident, Term};
+use crate::ast::Term;
 
 use nom::branch::alt;
 use nom::character::complete::alphanumeric1;
@@ -23,9 +22,9 @@ type Input<'a> = &'a str;
 #[tracing::instrument]
 pub fn term(input: Input<'_>) -> ParseResult<'_, Term> {
     ws(alt((
-        abstraction.map(From::from),
-        application.map(From::from),
-        variable.map(From::from),
+        abstraction,
+        application,
+        variable,
         parenthesized(term),
     )))(input)
 }
@@ -67,8 +66,8 @@ pub fn atomic_term(input: Input<'_>) -> ParseResult<'_, Term> {
 }
 
 #[tracing::instrument]
-pub fn abstraction(input: Input<'_>) -> ParseResult<'_, Abstraction> {
-    let arg = variable;
+pub fn abstraction(input: Input<'_>) -> ParseResult<'_, Term> {
+    let arg = ident;
     let body = term;
 
     let lam = |input| {
@@ -86,42 +85,27 @@ pub fn abstraction(input: Input<'_>) -> ParseResult<'_, Abstraction> {
     let (rest, _) = ws(tag("."))(rest)?;
     let (rest, body) = body(rest)?;
 
-    Ok((
-        rest,
-        Abstraction {
-            arg,
-            body: Box::new(body),
-        },
-    ))
+    Ok((rest, Term::Abstraction(arg, Box::new(body))))
 }
 
 #[tracing::instrument]
-pub fn application(input: Input<'_>) -> ParseResult<'_, Application> {
+pub fn application(input: Input<'_>) -> ParseResult<'_, Term> {
     let (rest, first) = atomic_term(input)?;
-    let (rest, apply) = fold_many1(
+    fold_many1(
         atomic_term,
-        || first.clone(),
-        |acc, curr| {
-            Term::Application(Application {
-                apply: Box::new(acc),
-                arg: Box::new(curr),
-            })
-        },
-    )(rest)?;
-    match apply {
-        Term::Application(app) => Ok((rest, app)),
-        _ => unreachable!(),
-    }
+        move || first.clone(),
+        |acc, curr| Term::Application(Box::new(acc), Box::new(curr)),
+    )(rest)
 }
 
 #[tracing::instrument]
-pub fn variable(input: Input<'_>) -> ParseResult<'_, Variable> {
-    ident.map(|ident| Variable { ident }).parse(input)
+pub fn variable(input: Input<'_>) -> ParseResult<'_, Term> {
+    ident.map(|ident| Term::Variable(ident)).parse(input)
 }
 
 #[tracing::instrument]
-pub fn ident(input: Input<'_>) -> ParseResult<'_, Ident> {
-    identifier.map(|id| Ident(id.into())).parse(input)
+pub fn ident(input: Input<'_>) -> ParseResult<'_, String> {
+    identifier.map(|id| id.into()).parse(input)
 }
 
 #[cfg(test)]
@@ -140,31 +124,25 @@ mod tests {
 
     macro_rules! id {
         ($ident: ident) => {
-            $crate::ast::Ident(stringify!($ident).to_string())
+            String::from(stringify!($ident))
         };
     }
 
     macro_rules! var {
         ($ident: ident) => {
-            $crate::ast::Variable { ident: id!($ident) }
+            $crate::ast::Term::Variable(id!($ident))
         };
     }
 
     macro_rules! abs {
         ($v: ident -> $b: expr) => {
-            $crate::ast::Abstraction {
-                arg: var!($v),
-                body: Box::new($b.into()),
-            }
+            $crate::ast::Term::Abstraction(id!($v), Box::new($b.into()))
         };
     }
 
     macro_rules! app {
         ($a: expr, $b: expr) => {
-            $crate::ast::Application {
-                apply: Box::new($a.into()),
-                arg: Box::new($b.into()),
-            }
+            $crate::ast::Term::Application(Box::new($a.into()), Box::new($b.into()))
         };
     }
 
