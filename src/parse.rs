@@ -234,4 +234,11 @@ mod tests {
             abstraction("λx. λy. x y") => Ok(("", abs!(x -> abs!(y -> app!(var!(x), var!(y))))))
         }
     }
+
+    #[test]
+    fn thing() {
+        assert_parses! {
+            term("((λx. λy. x) y) z") => Ok(("", app!(app!(abs!(x -> abs!(y -> var!(x))), var!(y)), var!(z))))
+        }
+    }
 }
