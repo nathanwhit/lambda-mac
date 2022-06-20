@@ -37,11 +37,7 @@ impl Term {
 #[cfg(test)]
 mod test {
 
-    use im::Vector;
-
-    use crate::ir::test::t;
-    use crate::parse::term;
-
+    #[allow(dead_code)]
     fn init_tracing() -> tracing::dispatcher::DefaultGuard {
         use tracing_subscriber::prelude::*;
         use tracing_subscriber::{EnvFilter, Registry};
@@ -52,20 +48,22 @@ mod test {
         tracing::subscriber::set_default(subscriber)
     }
 
-    #[test]
-    fn eval_basic() {
-        // let _foo = init_tracing();
-        pretty_assertions::assert_eq!(
-            term("(λ x. x) (λ y. y)").unwrap().1.lower().0.eval(),
-            t!(y -> t!(0))
-        );
+    macro_rules! eval_tests {
+        ($($name: ident : $tm: expr => $exp: expr);* $(;)?) => {
+            paste::paste! {
+                $(
+                    #[test]
+                    fn [<test_eval_ $name>]() {
+                        let (term_parsed, ctx) = $crate::parse::term($tm).unwrap().1.lower();
+                        ::pretty_assertions::assert_str_eq!(term_parsed.eval().print(::im::Vector::new(), &ctx), $exp);
+                    }
+                )*
+            }
+        };
     }
 
-    #[test]
-    fn eval_basic2() {
-        let _foo = init_tracing();
-        let (tm, ctx) = term("((λx. λy. x) y) z").unwrap().1.lower();
-        println!("{ctx:?}");
-        pretty_assertions::assert_str_eq!(tm.eval().print(Vector::new(), &ctx), "y");
+    eval_tests! {
+        eval_basic  : "(λ x. x) (λ y. y)" => "(λy. y)";
+        eval_basic2 : "((λx. λy. x) y) z" => "y";
     }
 }
