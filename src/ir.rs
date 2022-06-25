@@ -5,9 +5,11 @@ use smol_str::SmolStr;
 
 use crate::{ast, debruijn::DebruijnIndex};
 
+pub type Ident = SmolStr;
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum Term {
-    Abstraction(SmolStr, Box<Term>),
+    Abstraction(Ident, Box<Term>),
     Application(Box<Term>, Box<Term>),
     Variable(DebruijnIndex),
 }
@@ -15,12 +17,12 @@ pub enum Term {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Stmt {
     Expr(Term),
-    Bind(SmolStr, Term),
+    Bind(Ident, Term),
 }
 
 pub struct Context {
-    local_bindings: Vector<SmolStr>,
-    global_bindings: Vector<SmolStr>,
+    local_bindings: Vector<Ident>,
+    global_bindings: Vector<Ident>,
 }
 
 impl ast::Term {
@@ -45,7 +47,7 @@ impl Context {
         }
     }
 
-    pub fn name_of(&self, idx: DebruijnIndex) -> Option<SmolStr> {
+    pub fn name_of(&self, idx: DebruijnIndex) -> Option<Ident> {
         let idx = idx.depth() as usize;
         self.local_bindings
             .iter()
@@ -62,12 +64,12 @@ impl Context {
             .find_map(|(idx, n)| n.eq(name).then(|| DebruijnIndex::new(idx as u32)))
     }
 
-    pub fn add_local(&mut self, name: SmolStr) -> DebruijnIndex {
+    pub fn add_local(&mut self, name: Ident) -> DebruijnIndex {
         self.local_bindings.push_front(name);
         DebruijnIndex::new(0)
     }
 
-    pub fn add_global(&mut self, name: SmolStr) -> DebruijnIndex {
+    pub fn add_global(&mut self, name: Ident) -> DebruijnIndex {
         self.global_bindings.push_back(name);
         DebruijnIndex::new((self.local_bindings.len() + self.global_bindings.len() - 1) as u32)
     }
@@ -93,7 +95,7 @@ impl Context {
         }
     }
 
-    pub fn print_term(&mut self, term: &Term) -> SmolStr {
+    pub fn print_term(&mut self, term: &Term) -> String {
         match term {
             Term::Abstraction(arg, body) => self.enter(|ctx| {
                 ctx.add_local(arg.clone());
@@ -103,13 +105,14 @@ impl Context {
                 .enter(|ctx| format!("({} {})", ctx.print_term(&*a), ctx.print_term(&*b)).into()),
             Term::Variable(idx) => self
                 .name_of(*idx)
-                .expect(&format!("unbound variable {idx:?}")),
+                .expect(&format!("unbound variable {idx:?}"))
+                .into(),
         }
     }
 }
 
 impl Term {
-    pub fn print(&self, context: &mut Context) -> SmolStr {
+    pub fn print(&self, context: &mut Context) -> String {
         context.print_term(self)
     }
 
@@ -160,7 +163,7 @@ pub(crate) mod test {
 
     macro_rules! t_ {
         ($ident: ident) => {
-            SmolStr::from(SmolStrify!($ident))
+            ::smol_str::SmolStr::from(stringify!($ident))
         };
         ($idx: expr) => {
             $crate::ir::Term::Variable($crate::debruijn::DebruijnIndex::new($idx))

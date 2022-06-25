@@ -11,17 +11,19 @@ Var     = Ident
 
 use smol_str::SmolStr;
 
+pub type Ident = SmolStr;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Term {
-    Abstraction(SmolStr, Box<Term>),
+    Abstraction(Ident, Box<Term>),
     Application(Box<Term>, Box<Term>),
-    Variable(SmolStr),
+    Variable(Ident),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stmt {
     Expr(Term),
-    Bind(SmolStr, Term),
+    Bind(Ident, Term),
 }
 
 impl From<Term> for Stmt {
