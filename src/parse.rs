@@ -1,8 +1,11 @@
+use crate::ast::Stmt;
 use crate::ast::Term;
 
 use nom::branch::alt;
 use nom::character::complete::alphanumeric1;
 use nom::character::complete::multispace0;
+use nom::character::complete::newline;
+use nom::character::complete::space0;
 use nom::character::complete::{alpha1, multispace1};
 use nom::combinator::recognize;
 use nom::error::ParseError;
@@ -18,6 +21,25 @@ use nom_supreme::tag::TagError;
 
 type ParseResult<'a, O, E = ErrorTree<&'a str>> = IResult<&'a str, O, E>;
 type Input<'a> = &'a str;
+
+pub fn stmt(input: Input<'_>) -> ParseResult<'_, Stmt> {
+    ws(alt((bind, term.map(Stmt::Expr))))(input)
+}
+
+pub fn expr(input: Input<'_>) -> ParseResult<'_, Stmt> {
+    term.map(Stmt::Expr).parse(input)
+}
+
+pub fn bind(input: Input<'_>) -> ParseResult<'_, Stmt> {
+    let (input, name) = ws(ident)(input)?;
+    let (input, _) = ws(tag("="))(input)?;
+    let (input, term) = ws(term)(input)?;
+    let (input, _) = space0(input)?;
+
+    let (input, _) = alt((newline.map(|_| ()), tag(";").map(|_| ())))(input)?;
+
+    Ok((input, Stmt::Bind(name, term)))
+}
 
 #[tracing::instrument]
 pub fn term(input: Input<'_>) -> ParseResult<'_, Term> {
@@ -36,7 +58,7 @@ fn ws<'a, F: 'a, O, E: ParseError<&'a str>>(inner: F) -> impl FnMut(&'a str) -> 
 where
     F: Parser<&'a str, O, E>,
 {
-    delimited(multispace0, inner, multispace0)
+    delimited(space0, inner, space0)
 }
 
 #[tracing::instrument]
@@ -122,6 +144,19 @@ mod tests {
         };
     }
 
+    macro_rules! parse_tests {
+        ($($name: ident : $input: expr => $output: expr);* $(;)?) => {
+            paste::paste! {
+                $(
+                    #[test]
+                    fn [<test_parse_ $name>]() {
+                        assert_parse!($input, $output);
+                    }
+                )*
+            }
+        };
+    }
+
     macro_rules! id {
         ($ident: ident) => {
             String::from(stringify!($ident))
@@ -146,6 +181,12 @@ mod tests {
         };
     }
 
+    macro_rules! bind {
+        ($name: ident = $val: expr) => {
+            $crate::ast::Stmt::Bind(id!($name), $val.into())
+        };
+    }
+
     macro_rules! assert_parses {
         ($($thing: expr => $expect: expr),* $(,)?) => {
             $(
@@ -163,82 +204,49 @@ mod tests {
     }
 
     #[test]
-    fn identifier_works() {
-        assert_parses! {
-            identifier("abc")       => Ok(("", "abc")),
-            identifier("_")         => Ok(("", "_")),
-            identifier("_abc")      => Ok(("", "_abc")),
-            identifier("_abc_")     => Ok(("", "_abc_")),
-            identifier("_abc_123")  => Ok(("", "_abc_123")),
-        }
-    }
-
-    #[test]
-    fn ident_works() {
-        assert_parses! {
-            ident("abc")            => Ok(("", id!(abc))),
-            ident("3abc")           => Err(()),
-        }
-    }
-
-    #[test]
-    fn variable_works() {
-        assert_parses! {
-            variable("abc")         => Ok(("", var!(abc))),
-        }
-    }
-
-    #[test]
-    fn abstraction_works() {
-        assert_parses! {
-            abstraction("lambda x . x")  => Ok(("", abs!(x -> var!(x)))),
-            abstraction("λx.x")          => Ok(("", abs!(x -> var!(x)))),
-            abstraction("λx. x")         => Ok(("", abs!(x -> var!(x)))),
-            abstraction("λ x. x")        => Ok(("", abs!(x -> var!(x)))),
-            abstraction("lambda x. x")   => Ok(("", abs!(x -> var!(x)))),
-            abstraction("lambdax. x")    => Err(()),
-            abstraction("λx. λy. y")     => Ok(("", abs!(x -> abs!(y -> var!(y))))),
-            abstraction(r"\x. x")        => Ok(("", abs!(x -> var!(x)))),
-        }
-    }
-
-    #[test]
-    fn application_works() {
-        assert_parses! {
-            application("(λx. x) y")     => Ok(("", app!(abs!(x -> var!(x)), var!(y)).into())),
-            application("λx. x y")       => Err(()),
-        }
-    }
-
-    #[test]
-    fn term_works() {
-        assert_parses! {
-            term("λx. x")                => Ok(("", abs!(x -> var!(x)).into())),
-            term("(λx. x) y")            => Ok(("", app!(abs!(x -> var!(x)), var!(y)).into())),
-            term("(λx. x) y z")          => Ok(("", app!(app!(abs!(x -> var!(x)), var!(y)), var!(z)).into())),
-            term("((λx. x) y) z")        => Ok(("", app!(app!(abs!(x -> var!(x)), var!(y)), var!(z)).into())),
-        }
-    }
-
-    #[test]
-    fn application_is_left_associative() {
-        assert_parses! {
-            application("s t u") => Ok(("", app!(app!(var!(s), var!(t)), var!(u)).into())),
-            // application
-        }
-    }
-
-    #[test]
-    fn abstraction_is_right_associative() {
-        assert_parses! {
-            abstraction("λx. λy. x y") => Ok(("", abs!(x -> abs!(y -> app!(var!(x), var!(y))))))
-        }
-    }
-
-    #[test]
     fn thing() {
         assert_parses! {
             term("((λx. λy. x) y) z") => Ok(("", app!(app!(abs!(x -> abs!(y -> var!(x))), var!(y)), var!(z))))
         }
+    }
+
+    parse_tests! {
+        // identifier
+        basic_identifier                :   identifier("abc")            => Ok(("", "abc"));
+        identifier_leading_underscore   :   identifier("_")              => Ok(("", "_"));
+        identifier_numerics             :   identifier("_abc_123")       => Ok(("", "_abc_123"));
+        // ident
+        basic_ident                     :   ident("abc")                 => Ok(("", id!(abc)));
+        ident_leading_numeric           :   ident("3abc")                => Err(());
+        // variable
+        variable_basic                  :   variable("abc")              => Ok(("", var!(abc)));
+
+        // abstraction
+        basic_lambda_text               :   abstraction("lambda x . x")  => Ok(("", abs!(x -> var!(x))));
+        basic_lambda_no_ws              :   abstraction("λx.x")          => Ok(("", abs!(x -> var!(x))));
+        basic_lambda_ws                 :   abstraction("λx. x")         => Ok(("", abs!(x -> var!(x))));
+        basic_lambda_ws2                :   abstraction("λ x. x")        => Ok(("", abs!(x -> var!(x))));
+        lamda_text_ws                   :   abstraction("lambda x. x")   => Ok(("", abs!(x -> var!(x))));
+        lambda_text_no_ws               :   abstraction("lambdax. x")    => Err(());
+        nested_lambda                   :   abstraction("λx. λy. y")     => Ok(("", abs!(x -> abs!(y -> var!(y)))));
+        backslash_lambda                :   abstraction(r"\x. x")        => Ok(("", abs!(x -> var!(x))));
+
+        // term
+        term_abs                        :   term("λx. x")                => Ok(("", abs!(x -> var!(x)).into()));
+        id_app                          :   term("(λx. x) y")            => Ok(("", app!(abs!(x -> var!(x)), var!(y)).into()));
+        id_app_two                      :   term("(λx. x) y z")          => Ok(("", app!(app!(abs!(x -> var!(x)), var!(y)), var!(z)).into()));
+        app_multiple                    :   term("((λx. x) y) z")        => Ok(("", app!(app!(abs!(x -> var!(x)), var!(y)), var!(z)).into()));
+
+        // stmt
+        stmt_abs                        :   stmt("λx. x")                => Ok(("", abs!(x -> var!(x)).into()));
+        stmt_bind                       :   stmt("id = λx. x;")          => Ok(("", bind!(id = abs!(x -> var!(x)))));
+        bind_newline                    :   stmt("id = λx. x\n")         => Ok(("", bind!(id = abs!(x -> var!(x)))));
+
+        // associativity
+        application_is_left_assoc       :   application("s t u")         => Ok(("", app!(app!(var!(s), var!(t)), var!(u)).into()));
+        abstraction_is_right_assoc      :   abstraction("λx. λy. x y")   => Ok(("", abs!(x -> abs!(y -> app!(var!(x), var!(y))))));
+
+        // misc
+        thing                           :   term("((λx. λy. x) y) z")    => Ok(("", app!(app!(abs!(x -> abs!(y -> var!(x))), var!(y)), var!(z))));
     }
 }

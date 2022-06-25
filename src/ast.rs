@@ -15,3 +15,15 @@ pub enum Term {
     Application(Box<Term>, Box<Term>),
     Variable(String),
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Stmt {
+    Expr(Term),
+    Bind(String, Term),
+}
+
+impl From<Term> for Stmt {
+    fn from(term: Term) -> Self {
+        Stmt::Expr(term)
+    }
+}

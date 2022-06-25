@@ -9,20 +9,26 @@ pub enum Term {
     Variable(DebruijnIndex),
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub enum Stmt {
+    Expr(Term),
+    Bind(String, Term),
+}
+
 type LowerContext = Vector<String>;
 type GlobalContext = HashMap<DebruijnIndex, String>;
 
 impl ast::Term {
-    fn lower_(self, context: LowerContext, global: &mut GlobalContext) -> Term {
+    fn lower_internal(self, context: LowerContext, global: &mut GlobalContext) -> Term {
         match self {
             ast::Term::Abstraction(arg, body) => {
                 let mut context = context.clone();
                 context.push_front(arg.clone());
-                Term::Abstraction(arg, Box::new(body.lower_(context, global)))
+                Term::Abstraction(arg, Box::new(body.lower_internal(context, global)))
             }
             ast::Term::Application(a, b) => Term::Application(
-                Box::new(a.lower_(context.clone(), global)),
-                Box::new(b.lower_(context, global)),
+                Box::new(a.lower_internal(context.clone(), global)),
+                Box::new(b.lower_internal(context, global)),
             ),
             ast::Term::Variable(id) => {
                 Term::Variable(DebruijnIndex::new(match context.index_of(&id) {
@@ -39,7 +45,7 @@ impl ast::Term {
 
     pub fn lower(self) -> (Term, GlobalContext) {
         let mut global = HashMap::new();
-        (self.lower_(Vector::new(), &mut global), global)
+        (self.lower_internal(Vector::new(), &mut global), global)
     }
 }
 
