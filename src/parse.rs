@@ -17,6 +17,7 @@ use nom::Parser;
 use nom_supreme::error::ErrorTree;
 use nom_supreme::tag::complete::tag;
 use nom_supreme::tag::TagError;
+use smol_str::SmolStr;
 // use nom_supreme::ParserExt;
 
 type ParseResult<'a, O, E = ErrorTree<&'a str>> = IResult<&'a str, O, E>;
@@ -126,7 +127,7 @@ pub fn variable(input: Input<'_>) -> ParseResult<'_, Term> {
 }
 
 #[tracing::instrument]
-pub fn ident(input: Input<'_>) -> ParseResult<'_, String> {
+pub fn ident(input: Input<'_>) -> ParseResult<'_, SmolStr> {
     identifier.map(|id| id.into()).parse(input)
 }
 
@@ -159,7 +160,7 @@ mod tests {
 
     macro_rules! id {
         ($ident: ident) => {
-            String::from(stringify!($ident))
+            ::smol_str::SmolStr::from(stringify!($ident))
         };
     }
 

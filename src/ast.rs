@@ -9,17 +9,19 @@ Ident   = ("_" alpha) alphanum+
 Var     = Ident
 */
 
+use smol_str::SmolStr;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Term {
-    Abstraction(String, Box<Term>),
+    Abstraction(SmolStr, Box<Term>),
     Application(Box<Term>, Box<Term>),
-    Variable(String),
+    Variable(SmolStr),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stmt {
     Expr(Term),
-    Bind(String, Term),
+    Bind(SmolStr, Term),
 }
 
 impl From<Term> for Stmt {

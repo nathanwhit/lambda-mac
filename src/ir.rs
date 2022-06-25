@@ -1,12 +1,13 @@
 use std::mem;
 
 use im::Vector;
+use smol_str::SmolStr;
 
 use crate::{ast, debruijn::DebruijnIndex};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Term {
-    Abstraction(String, Box<Term>),
+    Abstraction(SmolStr, Box<Term>),
     Application(Box<Term>, Box<Term>),
     Variable(DebruijnIndex),
 }
@@ -14,12 +15,12 @@ pub enum Term {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Stmt {
     Expr(Term),
-    Bind(String, Term),
+    Bind(SmolStr, Term),
 }
 
 pub struct Context {
-    local_bindings: Vector<String>,
-    global_bindings: Vector<String>,
+    local_bindings: Vector<SmolStr>,
+    global_bindings: Vector<SmolStr>,
 }
 
 impl ast::Term {
@@ -44,13 +45,13 @@ impl Context {
         }
     }
 
-    pub fn name_of(&self, idx: DebruijnIndex) -> Option<String> {
+    pub fn name_of(&self, idx: DebruijnIndex) -> Option<SmolStr> {
         let idx = idx.depth() as usize;
         self.local_bindings
             .iter()
             .chain(self.global_bindings.iter())
             .nth(idx)
-            .map(|s| s.into())
+            .map(|s| s.clone())
     }
 
     pub fn index_of(&self, name: &str) -> Option<DebruijnIndex> {
@@ -61,12 +62,12 @@ impl Context {
             .find_map(|(idx, n)| n.eq(name).then(|| DebruijnIndex::new(idx as u32)))
     }
 
-    pub fn add_local(&mut self, name: String) -> DebruijnIndex {
+    pub fn add_local(&mut self, name: SmolStr) -> DebruijnIndex {
         self.local_bindings.push_front(name);
         DebruijnIndex::new(0)
     }
 
-    pub fn add_global(&mut self, name: String) -> DebruijnIndex {
+    pub fn add_global(&mut self, name: SmolStr) -> DebruijnIndex {
         self.global_bindings.push_back(name);
         DebruijnIndex::new((self.local_bindings.len() + self.global_bindings.len() - 1) as u32)
     }
@@ -92,15 +93,14 @@ impl Context {
         }
     }
 
-    pub fn print_term(&mut self, term: &Term) -> String {
+    pub fn print_term(&mut self, term: &Term) -> SmolStr {
         match term {
             Term::Abstraction(arg, body) => self.enter(|ctx| {
                 ctx.add_local(arg.clone());
-                format!("(λ{arg}. {})", ctx.print_term(&*body))
+                format!("(λ{arg}. {})", ctx.print_term(&*body)).into()
             }),
-            Term::Application(a, b) => {
-                self.enter(|ctx| format!("({} {})", ctx.print_term(&*a), ctx.print_term(&*b)))
-            }
+            Term::Application(a, b) => self
+                .enter(|ctx| format!("({} {})", ctx.print_term(&*a), ctx.print_term(&*b)).into()),
             Term::Variable(idx) => self
                 .name_of(*idx)
                 .expect(&format!("unbound variable {idx:?}")),
@@ -109,7 +109,7 @@ impl Context {
 }
 
 impl Term {
-    pub fn print(&self, context: &mut Context) -> String {
+    pub fn print(&self, context: &mut Context) -> SmolStr {
         context.print_term(self)
     }
 
@@ -160,13 +160,16 @@ pub(crate) mod test {
 
     macro_rules! t_ {
         ($ident: ident) => {
-            String::from(stringify!($ident))
+            SmolStr::from(SmolStrify!($ident))
         };
         ($idx: expr) => {
             $crate::ir::Term::Variable($crate::debruijn::DebruijnIndex::new($idx))
         };
         ($v: ident -> $b: expr) => {
-            $crate::ir::Term::Abstraction(String::from(stringify!($v)), Box::new($b.into()))
+            $crate::ir::Term::Abstraction(
+                ::smol_str::SmolStr::from(stringify!($v)),
+                Box::new($b.into()),
+            )
         };
         ($a: expr , $b: expr) => {
             $crate::ir::Term::Application(Box::new($a.into()), Box::new($b.into()))

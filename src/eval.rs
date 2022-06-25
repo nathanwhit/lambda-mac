@@ -56,7 +56,7 @@ mod test {
                     fn [<test_eval_ $name>]() {
                         let mut ctx = $crate::ir::Context::new();
                         let term_parsed = $crate::parse::term($tm).unwrap().1.lower(&mut ctx);
-                        ::pretty_assertions::assert_str_eq!(term_parsed.eval().print(&mut ctx), $exp);
+                        ::pretty_assertions::assert_str_eq!(term_parsed.eval().print(&mut ctx).as_str(), $exp);
                     }
                 )*
             }
