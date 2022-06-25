@@ -1,4 +1,6 @@
-use im::{HashMap, Vector};
+use std::mem;
+
+use im::Vector;
 
 use crate::{ast, debruijn::DebruijnIndex};
 
@@ -15,62 +17,100 @@ pub enum Stmt {
     Bind(String, Term),
 }
 
-type LowerContext = Vector<String>;
-type GlobalContext = HashMap<DebruijnIndex, String>;
+pub struct Context {
+    local_bindings: Vector<String>,
+    global_bindings: Vector<String>,
+}
 
 impl ast::Term {
-    fn lower_internal(self, context: LowerContext, global: &mut GlobalContext) -> Term {
-        match self {
-            ast::Term::Abstraction(arg, body) => {
-                let mut context = context.clone();
-                context.push_front(arg.clone());
-                Term::Abstraction(arg, Box::new(body.lower_internal(context, global)))
-            }
-            ast::Term::Application(a, b) => Term::Application(
-                Box::new(a.lower_internal(context.clone(), global)),
-                Box::new(b.lower_internal(context, global)),
-            ),
-            ast::Term::Variable(id) => {
-                Term::Variable(DebruijnIndex::new(match context.index_of(&id) {
-                    Some(idx) => idx as u32,
-                    None => {
-                        let idx = (global.len() + context.len()) as u32;
-                        global.insert(DebruijnIndex::new(idx), id.clone());
-                        idx
-                    }
-                }))
-            }
+    pub fn lower(self, ctx: &mut Context) -> Term {
+        ctx.lower_term(self)
+    }
+}
+
+impl Context {
+    pub fn enter<T>(&mut self, func: impl FnOnce(&mut Context) -> T) -> T {
+        let fresh = self.local_bindings.clone();
+        let local_bindings = mem::replace(&mut self.local_bindings, fresh);
+        let ret = func(self);
+        self.local_bindings = local_bindings;
+        ret
+    }
+
+    pub fn new() -> Self {
+        Self {
+            local_bindings: Vector::new(),
+            global_bindings: Vector::new(),
         }
     }
 
-    pub fn lower(self) -> (Term, GlobalContext) {
-        let mut global = HashMap::new();
-        (self.lower_internal(Vector::new(), &mut global), global)
+    pub fn name_of(&self, idx: DebruijnIndex) -> Option<String> {
+        let idx = idx.depth() as usize;
+        self.local_bindings
+            .iter()
+            .chain(self.global_bindings.iter())
+            .nth(idx)
+            .map(|s| s.into())
+    }
+
+    pub fn index_of(&self, name: &str) -> Option<DebruijnIndex> {
+        self.local_bindings
+            .iter()
+            .chain(self.global_bindings.iter())
+            .enumerate()
+            .find_map(|(idx, n)| n.eq(name).then(|| DebruijnIndex::new(idx as u32)))
+    }
+
+    pub fn add_local(&mut self, name: String) -> DebruijnIndex {
+        self.local_bindings.push_front(name);
+        DebruijnIndex::new(0)
+    }
+
+    pub fn add_global(&mut self, name: String) -> DebruijnIndex {
+        self.global_bindings.push_back(name);
+        DebruijnIndex::new((self.local_bindings.len() + self.global_bindings.len() - 1) as u32)
+    }
+
+    pub fn get_or_add_global(&mut self, name: &str) -> DebruijnIndex {
+        self.index_of(name)
+            .unwrap_or_else(|| self.add_global(name.into()))
+    }
+}
+
+impl Context {
+    pub fn lower_term(&mut self, term: ast::Term) -> Term {
+        match term {
+            ast::Term::Abstraction(arg, body) => self.enter(|ctx| {
+                ctx.add_local(arg.clone());
+                Term::Abstraction(arg, Box::new(ctx.lower_term(*body)))
+            }),
+            ast::Term::Application(a, b) => Term::Application(
+                self.enter(|ctx| Box::new(ctx.lower_term(*a))),
+                self.enter(|ctx| Box::new(ctx.lower_term(*b))),
+            ),
+            ast::Term::Variable(id) => Term::Variable(self.get_or_add_global(&id)),
+        }
+    }
+
+    pub fn print_term(&mut self, term: &Term) -> String {
+        match term {
+            Term::Abstraction(arg, body) => self.enter(|ctx| {
+                ctx.add_local(arg.clone());
+                format!("(λ{arg}. {})", ctx.print_term(&*body))
+            }),
+            Term::Application(a, b) => {
+                self.enter(|ctx| format!("({} {})", ctx.print_term(&*a), ctx.print_term(&*b)))
+            }
+            Term::Variable(idx) => self
+                .name_of(*idx)
+                .expect(&format!("unbound variable {idx:?}")),
+        }
     }
 }
 
 impl Term {
-    pub fn print(&self, context: LowerContext, global: &GlobalContext) -> String {
-        match self {
-            Term::Abstraction(arg, body) => {
-                let mut context = context.clone();
-                context.push_front(arg.clone());
-                format!("(λ{}. {})", arg, &body.print(context, global))
-            }
-            Term::Application(lhs, rhs) => format!(
-                "({} {})",
-                &lhs.print(context.clone(), global),
-                &rhs.print(context, global)
-            ),
-            Term::Variable(idx) => {
-                let depth = idx.depth() as usize;
-                if depth >= context.len() {
-                    format!("{}", global[&idx])
-                } else {
-                    format!("{}", context[depth])
-                }
-            }
-        }
+    pub fn print(&self, context: &mut Context) -> String {
+        context.print_term(self)
     }
 
     pub fn is_value(&self) -> bool {
@@ -85,44 +125,35 @@ impl Term {
     }
 }
 
-#[extend::ext]
-pub impl (Term, GlobalContext) {
-    fn print(&self) -> String {
-        self.0.print(Vector::new(), &self.1)
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod test {
-    use super::*;
     use crate::parse::term;
 
     macro_rules! assert_lowers {
-        ($thing:expr, $expect:expr) => {
-            ::pretty_assertions::assert_eq!($thing.unwrap().1.lower().0, $expect)
+        ($ctx:expr; $thing:expr, $expect:expr) => {
+            ::pretty_assertions::assert_eq!($ctx.lower_term($thing.unwrap().1), $expect)
         };
-        ($($thing: expr => $expect: expr),* $(,)?) => {
+        ($ctx:expr; $($thing: expr => $expect: expr),* $(,)?) => {
             $(
-                assert_lowers!($thing, $expect);
+                assert_lowers!($ctx; $thing, $expect);
             )*
         };
     }
 
     macro_rules! assert_prints {
-        ($thing: expr, $expect: expr) => {
+        ($ctx:expr; $thing: expr, $expect: expr) => {
+            let lowered = $ctx.lower_term($thing.unwrap().1);
             ::pretty_assertions::assert_eq!(
-                $thing
-                    .unwrap()
-                    .1
-                    .lower()
-                    .print()
-                    .as_str(),
+                $ctx.print_term(
+                    &lowered
+                )
+                .as_str(),
                 $expect
             )
         };
-        ($(thing: expr => $expect: expr),* $(,)?) => {
+        ($ctx:expr; $(thing: expr => $expect: expr),* $(,)?) => {
             $(
-                assert_prints!(thing, $expect);
+                assert_prints!(ctx; thing, $expect);
             )*
         };
     }
@@ -151,7 +182,8 @@ pub(crate) mod test {
                 paste::paste! {
                     #[test]
                     fn [<test_lower_ $test>]() {
-                        assert_lowers!($a, $b);
+                        let mut ctx = $crate::ir::Context::new();
+                        assert_lowers!(ctx; $a, $b);
                     }
                 }
             )*
@@ -164,7 +196,8 @@ pub(crate) mod test {
                 paste::paste! {
                     #[test]
                     fn [<test_print_ $test>]() {
-                        assert_prints!($a, $b);
+                        let mut ctx = $crate::ir::Context::new();
+                        assert_prints!(ctx; $a, $b);
                     }
                 }
             )*

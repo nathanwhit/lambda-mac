@@ -53,7 +53,8 @@ mod test {
     use crate::ir::test::t;
 
     fn term(s: &str) -> Term {
-        crate::parse::term(s).unwrap().1.lower().0
+        let mut ctx = crate::ir::Context::new();
+        crate::parse::term(s).unwrap().1.lower(&mut ctx)
     }
 
     macro_rules! shifting_tests {
