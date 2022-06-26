@@ -7,7 +7,7 @@ use crate::{
     ir::{Statement, Term},
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct EvalContext {
     statements: Vec<Statement>,
     global_values: HashMap<DebruijnIndex, Term>,
@@ -26,6 +26,9 @@ impl EvalContext {
             global_values: HashMap::new(),
         }
     }
+    pub fn print_globals(&self) {
+        println!("{:?}", self.global_values);
+    }
     pub fn load(&mut self, statements: impl IntoIterator<Item = Statement>) {
         self.statements.extend(statements);
     }
@@ -36,6 +39,7 @@ impl EvalContext {
             match stmt {
                 crate::ir::Stmt::Expr(term) => {
                     let res = self.eval_term(term.clone());
+                    tracing::debug!(?context, ?res, "evaluating expr");
                     if print {
                         println!(
                             "{}",
@@ -65,14 +69,17 @@ impl EvalContext {
         res
     }
 
+    #[tracing::instrument]
     pub fn eval_term(&mut self, term: Term) -> Term {
-        fn eval1(ctx: &mut EvalContext, term: Term) -> ControlFlow<Term, Term> {
+        #[tracing::instrument]
+        fn eval1(ctx: &mut EvalContext, term: Term) -> ControlFlow<(), Term> {
             match term {
                 Term::Application(lhs, rhs) if lhs.is_value() && rhs.is_value() => {
                     let body = lhs.body().unwrap().clone();
                     ControlFlow::Continue(body.substituted(*rhs))
                 }
                 Term::Application(lhs, rhs) if lhs.is_value() => {
+                    tracing::debug!("here!");
                     ControlFlow::Continue(Term::Application(lhs, Box::new(eval1(ctx, *rhs)?)))
                 }
                 Term::Application(lhs, rhs) => {
@@ -80,22 +87,18 @@ impl EvalContext {
                 }
                 Term::Variable(idx) => {
                     if let Some(val) = ctx.global_values.get(&idx) {
+                        tracing::debug!("continuing with global");
                         return ControlFlow::Continue(val.clone());
                     } else {
-                        ControlFlow::Break(term)
+                        ControlFlow::Break(())
                     }
                 }
-                _ => ControlFlow::Break(term),
+                _ => ControlFlow::Break(()),
             }
         }
-        let mut current = term;
-        loop {
-            match eval1(self, current) {
-                ControlFlow::Continue(term) => {
-                    current = term;
-                }
-                ControlFlow::Break(term) => return term,
-            }
+        match eval1(self, term.clone()) {
+            ControlFlow::Continue(term) => self.eval_term(term),
+            ControlFlow::Break(()) => term,
         }
     }
 }

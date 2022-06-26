@@ -20,26 +20,26 @@ pub enum Stmt {
     Bind(Ident, Term),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Statement {
     pub stmt: Stmt,
     pub context: NamingContext,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BindingKind {
     Free,
     Global,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Binding {
     name: Ident,
     #[allow(dead_code)]
     kind: BindingKind,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct NamingContext {
     local_bindings: Vector<Ident>,
     global_bindings: Vector<Binding>,
@@ -113,7 +113,7 @@ impl NamingContext {
 
     pub fn get_or_add_free(&mut self, name: &str) -> DebruijnIndex {
         self.index_of(name)
-            .unwrap_or_else(|| self.add_global(name.into()))
+            .unwrap_or_else(|| self.add_free(name.into()))
     }
 }
 
