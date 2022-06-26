@@ -1,3 +1,4 @@
+use clap::{Parser, Subcommand};
 use lambda_mac::eval::EvalContext;
 use nom::{error::convert_error, Finish};
 use rustyline::Editor;
@@ -13,8 +14,19 @@ fn init_tracing() -> DefaultGuard {
     tracing::subscriber::set_default(subscriber)
 }
 
-fn main() -> rustyline::Result<()> {
-    let _tracing = init_tracing();
+#[derive(Parser)]
+struct Cli {
+    #[clap(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Run { path: String },
+    Repl,
+}
+
+fn repl() -> rustyline::Result<()> {
     let mut rl = Editor::<()>::new();
     let mut name_ctx = lambda_mac::ir::NamingContext::new();
     let mut eval_ctx = EvalContext::new(vec![]);
@@ -22,12 +34,14 @@ fn main() -> rustyline::Result<()> {
         let line = rl.readline("> ")?;
         if line.trim() == "print" {
             eval_ctx.print_globals();
+            rl.add_history_entry(line);
             continue;
         }
         let stmts = match lambda_mac::parse::program(&line).finish() {
             Ok((_, stmts)) => stmts,
             Err(e) => {
                 eprintln!("{}", convert_error(&*line, e));
+                rl.add_history_entry(line);
                 continue;
             }
         };
@@ -36,4 +50,28 @@ fn main() -> rustyline::Result<()> {
         eval_ctx.eval(true);
         rl.add_history_entry(line);
     }
+}
+
+fn run(path: &str) -> color_eyre::Result<()> {
+    let input = std::fs::read_to_string(path)?;
+    let mut name_ctx = lambda_mac::ir::NamingContext::new();
+    let (_, program) = lambda_mac::parse::program(&input)
+        .finish()
+        .map_err(|e| color_eyre::eyre::eyre!("parse error: {}", convert_error(&*input, e)))?;
+    let lowered = name_ctx.lower_stmts(program);
+    let mut eval_ctx = EvalContext::new(lowered);
+    eval_ctx.eval(true);
+    Ok(())
+}
+
+fn main() -> color_eyre::Result<()> {
+    color_eyre::install()?;
+    let _tracing = init_tracing();
+
+    let cli = Cli::parse();
+    match cli.command {
+        Commands::Run { path } => run(&path)?,
+        Commands::Repl => repl()?,
+    }
+    Ok(())
 }
