@@ -12,6 +12,7 @@ pub enum Term {
     Abstraction(Ident, Box<Term>),
     Application(Box<Term>, Box<Term>),
     Variable(DebruijnIndex),
+    Let(Ident, Box<Term>, Box<Term>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -124,11 +125,17 @@ impl NamingContext {
                 ctx.add_local(arg.clone());
                 Term::Abstraction(arg, Box::new(ctx.lower_term(*body)))
             }),
-            ast::Term::Application(a, b) => Term::Application(
-                self.enter(|ctx| Box::new(ctx.lower_term(*a))),
-                self.enter(|ctx| Box::new(ctx.lower_term(*b))),
-            ),
+            ast::Term::Application(a, b) => {
+                Term::Application(Box::new(self.lower_term(*a)), Box::new(self.lower_term(*b)))
+            }
             ast::Term::Variable(id) => Term::Variable(self.get_or_add_free(&id)),
+            ast::Term::Let(id, value, body) => {
+                let value = self.lower_term(*value);
+                self.enter(|ctx| {
+                    ctx.add_local(id.clone());
+                    Term::Let(id, Box::new(value), Box::new(ctx.lower_term(*body)))
+                })
+            }
         }
     }
 
@@ -144,6 +151,14 @@ impl NamingContext {
                 .name_of(*idx)
                 .expect(&format!("unbound variable {idx:?}"))
                 .into(),
+            Term::Let(id, value, body) => {
+                let value_print = self.print_term(&*value);
+                self.enter(|ctx| {
+                    ctx.add_local(id.clone());
+
+                    format!("let {id} = {value_print} in {}", ctx.print_term(&*body))
+                })
+            }
         }
     }
 }

@@ -9,6 +9,7 @@ use nom::character::complete::space0;
 use nom::character::complete::{alpha1, multispace1};
 use nom::combinator::eof;
 use nom::combinator::recognize;
+use nom::combinator::verify;
 use nom::error::ParseError;
 use nom::error::VerboseError;
 use nom::multi::many1;
@@ -68,11 +69,23 @@ pub fn bind(input: Input<'_>) -> ParseResult<'_, Stmt> {
 #[tracing::instrument]
 pub fn term(input: Input<'_>) -> ParseResult<'_, Term> {
     ws(alt((
+        let_term.context("let"),
         abstraction,
         application,
         variable,
         parenthesized(term),
     )))(input)
+}
+
+#[tracing::instrument]
+pub fn let_term(input: Input<'_>) -> ParseResult<'_, Term> {
+    let (input, _) = ws(tag("let"))(input)?;
+    let (input, name) = ws(ident)(input)?;
+    let (input, _) = ws(tag("="))(input)?;
+    let (input, value) = ws(term)(input)?;
+    let (input, _) = ws(tag("in"))(input)?;
+    let (input, body) = ws(term)(input)?;
+    Ok((input, Term::Let(name, Box::new(value), Box::new(body))))
 }
 
 /// A combinator that takes a parser `inner` and produces a parser that also consumes both leading and
@@ -149,9 +162,13 @@ pub fn variable(input: Input<'_>) -> ParseResult<'_, Term> {
     ident.map(|ident| Term::Variable(ident)).parse(input)
 }
 
+const KEYWORDS: [&'static str; 2] = ["let", "in"];
+
 #[tracing::instrument]
 pub fn ident(input: Input<'_>) -> ParseResult<'_, SmolStr> {
-    identifier.map(|id| id.into()).parse(input)
+    verify(identifier, |id| !KEYWORDS.contains(id))
+        .map(|id| id.into())
+        .parse(input)
 }
 
 #[cfg(test)]

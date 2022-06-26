@@ -30,6 +30,11 @@ impl Term {
                     Box::new(walk(*lhs, target, outer, subst.clone())),
                     Box::new(walk(*rhs, target, outer, subst)),
                 ),
+                Term::Let(id, value, body) => Term::Let(
+                    id,
+                    Box::new(walk(*value, target, outer, subst.clone())),
+                    Box::new(walk(*body, target, outer.shifted_in(), subst)),
+                ),
             }
         }
 

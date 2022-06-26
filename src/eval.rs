@@ -93,6 +93,12 @@ impl EvalContext {
                         ControlFlow::Break(())
                     }
                 }
+                Term::Let(_, value, body) if value.is_value() => {
+                    ControlFlow::Continue(body.substituted(*value))
+                }
+                Term::Let(id, value, body) => {
+                    ControlFlow::Continue(Term::Let(id, Box::new(eval1(ctx, *value)?), body))
+                }
                 _ => ControlFlow::Break(()),
             }
         }

@@ -18,6 +18,7 @@ pub enum Term {
     Abstraction(Ident, Box<Term>),
     Application(Box<Term>, Box<Term>),
     Variable(Ident),
+    Let(Ident, Box<Term>, Box<Term>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

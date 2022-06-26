@@ -35,6 +35,11 @@ impl Term {
                     }
                 }
             }
+            Term::Let(id, value, body) => Term::Let(
+                id,
+                Box::new(value.shifted(amount, outer_binder, direction)?),
+                Box::new(body.shifted(amount, outer_binder.shifted_in(), direction)?),
+            ),
         })
     }
     pub fn shifted_in(self, amount: DebruijnIndex) -> Term {
