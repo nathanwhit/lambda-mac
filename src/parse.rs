@@ -7,6 +7,7 @@ use nom::character::complete::multispace0;
 use nom::character::complete::newline;
 use nom::character::complete::space0;
 use nom::character::complete::{alpha1, multispace1};
+use nom::combinator::eof;
 use nom::combinator::recognize;
 use nom::error::ParseError;
 use nom::multi::many0;
@@ -34,7 +35,7 @@ fn chomp_newlines(input: Input<'_>) -> ParseResult<'_, usize> {
 
 pub fn statement(input: Input<'_>) -> ParseResult<'_, Stmt> {
     let (input, stmt) = stmt(input)?;
-    let (input, _) = ws(tag(";"))(input)?;
+    let (input, _) = ws(alt((tag(";"), eof)))(input)?;
     let (input, _) = chomp_newlines(input)?;
     Ok((input, stmt))
 }

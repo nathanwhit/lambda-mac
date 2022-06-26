@@ -163,6 +163,10 @@ impl NamingContext {
         }
     }
 
+    pub fn lower_stmts(&mut self, stmts: impl IntoIterator<Item = ast::Stmt>) -> Vec<Statement> {
+        stmts.into_iter().map(|s| self.lower_stmt(s)).collect()
+    }
+
     pub fn print_stmt(&mut self, stmt: &Stmt) -> String {
         match stmt {
             Stmt::Expr(e) => self.print_term(e),

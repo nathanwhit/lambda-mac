@@ -20,7 +20,16 @@ impl EvalContext {
             global_values: HashMap::new(),
         }
     }
-    pub fn eval(mut self, print: bool) -> Vec<Term> {
+    pub fn empty() -> Self {
+        Self {
+            statements: Vec::new(),
+            global_values: HashMap::new(),
+        }
+    }
+    pub fn load(&mut self, statements: impl IntoIterator<Item = Statement>) {
+        self.statements.extend(statements);
+    }
+    pub fn eval(&mut self, print: bool) -> Vec<Term> {
         let mut res = Vec::new();
         let statements = std::mem::take(&mut self.statements);
         for Statement { stmt, mut context } in statements {
@@ -29,8 +38,8 @@ impl EvalContext {
                     let res = self.eval_term(term.clone());
                     if print {
                         println!(
-                            "{} -> {}",
-                            context.print_term(&term),
+                            "{}",
+                            // context.print_term(&term),
                             context.print_term(&res)
                         );
                     }
@@ -44,8 +53,8 @@ impl EvalContext {
                     self.global_values.insert(idx, value.clone());
                     if print {
                         println!(
-                            "{name} = {} -> {name} = {}",
-                            context.print_term(&expr),
+                            "{name} = {}",
+                            // context.print_term(&expr),
                             context.print_term(&value)
                         );
                     }
