@@ -149,7 +149,7 @@ pub fn ident(input: Input<'_>) -> ParseResult<'_, SmolStr> {
 #[cfg(test)]
 mod tests {
     use tracing::dispatcher::DefaultGuard;
-    use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, EnvFilter, Registry};
+    use tracing_subscriber::{prelude::*, EnvFilter, Registry};
     use tracing_tree::HierarchicalLayer;
 
     use super::*;

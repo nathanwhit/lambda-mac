@@ -19,9 +19,14 @@ fn main() -> rustyline::Result<()> {
     let mut eval_ctx = EvalContext::new(vec![]);
     loop {
         let line = rl.readline("> ")?;
+        if line.trim() == "print" {
+            eval_ctx.print_globals();
+            continue;
+        }
         let (_, stmts) = lambda_mac::parse::program(&line).unwrap();
         let lowered = name_ctx.lower_stmts(stmts);
         eval_ctx.load(lowered);
         eval_ctx.eval(true);
+        rl.add_history_entry(line);
     }
 }
