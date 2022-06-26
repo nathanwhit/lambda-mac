@@ -53,7 +53,7 @@ mod test {
     use crate::ir::test::t;
 
     fn term(s: &str) -> Term {
-        let mut ctx = crate::ir::Context::new();
+        let mut ctx = crate::ir::NamingContext::new();
         crate::parse::term(s).unwrap().1.lower(&mut ctx)
     }
 
@@ -75,6 +75,6 @@ mod test {
         free_var    : term("x").shifted_in(DebruijnIndex::ONE)                      => t!(1);
         app         : term("((λ x. x) (λ y. y)) z").shifted_in(DebruijnIndex::ONE)  => t!(t!(t!(x -> t!(0)), t!(y -> t!(0))), t!(1));
         out_zero    : term("y").shifted_out(DebruijnIndex::ONE)                     => None;
-        out_one     : term("λx. y").shifted_out(DebruijnIndex::ONE)                     => Some(t!(x -> t!(0)));
+        out_one     : term("λx. y").shifted_out(DebruijnIndex::ONE)                 => Some(t!(x -> t!(0)));
     }
 }

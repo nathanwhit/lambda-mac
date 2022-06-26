@@ -20,19 +20,45 @@ pub enum Stmt {
     Bind(Ident, Term),
 }
 
-pub struct Context {
+#[derive(Clone)]
+pub struct Statement {
+    pub stmt: Stmt,
+    pub context: NamingContext,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum BindingKind {
+    Free,
+    Global,
+}
+
+#[derive(Clone)]
+pub struct Binding {
+    name: Ident,
+    #[allow(dead_code)]
+    kind: BindingKind,
+}
+
+#[derive(Clone)]
+pub struct NamingContext {
     local_bindings: Vector<Ident>,
-    global_bindings: Vector<Ident>,
+    global_bindings: Vector<Binding>,
 }
 
 impl ast::Term {
-    pub fn lower(self, ctx: &mut Context) -> Term {
+    pub fn lower(self, ctx: &mut NamingContext) -> Term {
         ctx.lower_term(self)
     }
 }
 
-impl Context {
-    pub fn enter<T>(&mut self, func: impl FnOnce(&mut Context) -> T) -> T {
+impl NamingContext {
+    pub fn non_local(&self) -> Self {
+        Self {
+            local_bindings: Vector::new(),
+            global_bindings: self.global_bindings.clone(),
+        }
+    }
+    pub fn enter<T>(&mut self, func: impl FnOnce(&mut NamingContext) -> T) -> T {
         let fresh = self.local_bindings.clone();
         let local_bindings = mem::replace(&mut self.local_bindings, fresh);
         let ret = func(self);
@@ -51,7 +77,7 @@ impl Context {
         let idx = idx.depth() as usize;
         self.local_bindings
             .iter()
-            .chain(self.global_bindings.iter())
+            .chain(self.global_bindings.iter().map(|b| &b.name))
             .nth(idx)
             .map(|s| s.clone())
     }
@@ -59,7 +85,7 @@ impl Context {
     pub fn index_of(&self, name: &str) -> Option<DebruijnIndex> {
         self.local_bindings
             .iter()
-            .chain(self.global_bindings.iter())
+            .chain(self.global_bindings.iter().map(|b| &b.name))
             .enumerate()
             .find_map(|(idx, n)| n.eq(name).then(|| DebruijnIndex::new(idx as u32)))
     }
@@ -70,17 +96,28 @@ impl Context {
     }
 
     pub fn add_global(&mut self, name: Ident) -> DebruijnIndex {
-        self.global_bindings.push_back(name);
+        self.global_bindings.push_back(Binding {
+            name,
+            kind: BindingKind::Global,
+        });
         DebruijnIndex::new((self.local_bindings.len() + self.global_bindings.len() - 1) as u32)
     }
 
-    pub fn get_or_add_global(&mut self, name: &str) -> DebruijnIndex {
+    pub fn add_free(&mut self, name: Ident) -> DebruijnIndex {
+        self.global_bindings.push_back(Binding {
+            name,
+            kind: BindingKind::Free,
+        });
+        DebruijnIndex::new((self.local_bindings.len() + self.global_bindings.len() - 1) as u32)
+    }
+
+    pub fn get_or_add_free(&mut self, name: &str) -> DebruijnIndex {
         self.index_of(name)
             .unwrap_or_else(|| self.add_global(name.into()))
     }
 }
 
-impl Context {
+impl NamingContext {
     pub fn lower_term(&mut self, term: ast::Term) -> Term {
         match term {
             ast::Term::Abstraction(arg, body) => self.enter(|ctx| {
@@ -91,7 +128,7 @@ impl Context {
                 self.enter(|ctx| Box::new(ctx.lower_term(*a))),
                 self.enter(|ctx| Box::new(ctx.lower_term(*b))),
             ),
-            ast::Term::Variable(id) => Term::Variable(self.get_or_add_global(&id)),
+            ast::Term::Variable(id) => Term::Variable(self.get_or_add_free(&id)),
         }
     }
 
@@ -111,8 +148,31 @@ impl Context {
     }
 }
 
+impl NamingContext {
+    pub fn lower_stmt(&mut self, stmt: ast::Stmt) -> Statement {
+        let stmt = match stmt {
+            ast::Stmt::Expr(e) => Stmt::Expr(self.lower_term(e)),
+            ast::Stmt::Bind(id, val) => {
+                self.add_global(id.clone());
+                Stmt::Bind(id, self.lower_term(val))
+            }
+        };
+        Statement {
+            stmt,
+            context: self.non_local(),
+        }
+    }
+
+    pub fn print_stmt(&mut self, stmt: &Stmt) -> String {
+        match stmt {
+            Stmt::Expr(e) => self.print_term(e),
+            Stmt::Bind(id, e) => format!("{id} = {}", self.print_term(e)),
+        }
+    }
+}
+
 impl Term {
-    pub fn print(&self, context: &mut Context) -> String {
+    pub fn print(&self, context: &mut NamingContext) -> String {
         context.print_term(self)
     }
 
@@ -188,7 +248,7 @@ pub(crate) mod test {
                 paste::paste! {
                     #[test]
                     fn [<test_lower_ $test>]() {
-                        let mut ctx = $crate::ir::Context::new();
+                        let mut ctx = $crate::ir::NamingContext::new();
                         assert_lowers!(ctx; $a, $b);
                     }
                 }
@@ -202,7 +262,7 @@ pub(crate) mod test {
                 paste::paste! {
                     #[test]
                     fn [<test_print_ $test>]() {
-                        let mut ctx = $crate::ir::Context::new();
+                        let mut ctx = $crate::ir::NamingContext::new();
                         assert_prints!(ctx; $a, $b);
                     }
                 }
@@ -232,5 +292,6 @@ pub(crate) mod test {
         app_abs     :   term("(λ x. x) (λ y. y)")   => "((λx. x) (λy. y))";
         free_var    :   term("λx. x y")             => "(λx. (x y))";
         shadowing   :   term("λx. λy. λx. x y")     => "(λx. (λy. (λx. (x y))))";
+        thing       :   term("((λx. λy. x) y) z")   => "(((λx. (λy. x)) y) z)";
     }
 }

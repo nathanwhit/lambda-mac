@@ -36,8 +36,8 @@ impl Term {
         walk(self, target, DebruijnIndex::INNERMOST, subst)
     }
 
-    pub fn substitute(&mut self, subst: Term) {
-        *self = self.clone().substituted(subst);
+    pub fn substituted_with(self, target: DebruijnIndex, subst: Term) -> Term {
+        self.substituted_(target, subst)
     }
 }
 

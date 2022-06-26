@@ -9,6 +9,7 @@ use nom::character::complete::space0;
 use nom::character::complete::{alpha1, multispace1};
 use nom::combinator::recognize;
 use nom::error::ParseError;
+use nom::multi::many0;
 use nom::multi::{fold_many1, many0_count};
 use nom::sequence::delimited;
 use nom::sequence::pair;
@@ -23,6 +24,21 @@ use smol_str::SmolStr;
 type ParseResult<'a, O, E = ErrorTree<&'a str>> = IResult<&'a str, O, E>;
 type Input<'a> = &'a str;
 
+pub fn program(input: Input<'_>) -> ParseResult<'_, Vec<Stmt>> {
+    many0(statement)(input)
+}
+
+fn chomp_newlines(input: Input<'_>) -> ParseResult<'_, usize> {
+    many0_count(newline)(input)
+}
+
+pub fn statement(input: Input<'_>) -> ParseResult<'_, Stmt> {
+    let (input, stmt) = stmt(input)?;
+    let (input, _) = ws(tag(";"))(input)?;
+    let (input, _) = chomp_newlines(input)?;
+    Ok((input, stmt))
+}
+
 pub fn stmt(input: Input<'_>) -> ParseResult<'_, Stmt> {
     ws(alt((bind, term.map(Stmt::Expr))))(input)
 }
@@ -36,8 +52,6 @@ pub fn bind(input: Input<'_>) -> ParseResult<'_, Stmt> {
     let (input, _) = ws(tag("="))(input)?;
     let (input, term) = ws(term)(input)?;
     let (input, _) = space0(input)?;
-
-    let (input, _) = alt((newline.map(|_| ()), tag(";").map(|_| ())))(input)?;
 
     Ok((input, Stmt::Bind(name, term)))
 }
@@ -240,8 +254,7 @@ mod tests {
 
         // stmt
         stmt_abs                        :   stmt("λx. x")                => Ok(("", abs!(x -> var!(x)).into()));
-        stmt_bind                       :   stmt("id = λx. x;")          => Ok(("", bind!(id = abs!(x -> var!(x)))));
-        bind_newline                    :   stmt("id = λx. x\n")         => Ok(("", bind!(id = abs!(x -> var!(x)))));
+        stmt_bind                       :   stmt("id = λx. x")           => Ok(("", bind!(id = abs!(x -> var!(x)))));
 
         // associativity
         application_is_left_assoc       :   application("s t u")         => Ok(("", app!(app!(var!(s), var!(t)), var!(u)).into()));
@@ -249,5 +262,8 @@ mod tests {
 
         // misc
         thing                           :   term("((λx. λy. x) y) z")    => Ok(("", app!(app!(abs!(x -> abs!(y -> var!(x))), var!(y)), var!(z))));
+
+        // program
+        basic_program                   :   program("foo = x; bar = y;") => Ok(("", vec![bind!(foo = var!(x)), bind!(bar = var!(y))]));
     }
 }
