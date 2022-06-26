@@ -21,10 +21,13 @@ pub enum Term {
     Let(Ident, Box<Term>, Box<Term>),
 }
 
+pub type Path = SmolStr;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stmt {
     Expr(Term),
     Bind(Ident, Term),
+    Import(Path),
 }
 
 impl From<Term> for Stmt {

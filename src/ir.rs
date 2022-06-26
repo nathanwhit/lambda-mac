@@ -7,6 +7,8 @@ use crate::{ast, debruijn::DebruijnIndex};
 
 pub type Ident = SmolStr;
 
+pub type Path = SmolStr;
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum Term {
     Abstraction(Ident, Box<Term>),
@@ -19,6 +21,7 @@ pub enum Term {
 pub enum Stmt {
     Expr(Term),
     Bind(Ident, Term),
+    Import(Path),
 }
 
 #[derive(Clone, Debug)]
@@ -171,6 +174,7 @@ impl NamingContext {
                 self.add_global(id.clone());
                 Stmt::Bind(id, self.lower_term(val))
             }
+            ast::Stmt::Import(path) => Stmt::Import(path),
         };
         Statement {
             stmt,
@@ -186,6 +190,7 @@ impl NamingContext {
         match stmt {
             Stmt::Expr(e) => self.print_term(e),
             Stmt::Bind(id, e) => format!("{id} = {}", self.print_term(e)),
+            Stmt::Import(path) => format!("import \"{path}\""),
         }
     }
 }

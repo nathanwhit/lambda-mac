@@ -1,11 +1,14 @@
+use crate::ast::Path;
 use crate::ast::Stmt;
 use crate::ast::Term;
 
 use nom::branch::alt;
+use nom::bytes::complete::take_till;
 use nom::character::complete::alphanumeric1;
 use nom::character::complete::multispace0;
 use nom::character::complete::newline;
 use nom::character::complete::space0;
+use nom::character::complete::space1;
 use nom::character::complete::{alpha1, multispace1};
 use nom::combinator::eof;
 use nom::combinator::recognize;
@@ -48,6 +51,7 @@ pub fn statement(input: Input<'_>) -> ParseResult<'_, Stmt> {
 
 pub fn stmt(input: Input<'_>) -> ParseResult<'_, Stmt> {
     ws(alt((
+        import.context("import"),
         bind.context("binding"),
         term.context("term").map(Stmt::Expr),
     )))(input)
@@ -64,6 +68,46 @@ pub fn bind(input: Input<'_>) -> ParseResult<'_, Stmt> {
     let (input, _) = space0(input)?;
 
     Ok((input, Stmt::Bind(name, term)))
+}
+
+pub fn import(input: Input<'_>) -> ParseResult<'_, Stmt> {
+    let (input, _) = space0(input)?;
+    let (input, _) = tag("import")(input)?;
+    let (input, _) = space1(input)?;
+    let (input, path) = path(input)?;
+    Ok((input, Stmt::Import(path)))
+}
+
+#[tracing::instrument]
+pub fn path_segment(input: Input<'_>) -> ParseResult<'_, &str> {
+    take_till(|b| b == '/' || b == '"')
+        .verify(|s: &&str| s.len() > 0)
+        .parse(input)
+}
+
+pub fn path_segment_slash(input: Input<'_>) -> ParseResult<'_, &str> {
+    let (input, o) = path_segment(input)?;
+    let (input, _) = slash.opt().parse(input)?;
+    Ok((input, o))
+}
+
+#[tracing::instrument]
+pub fn slash(input: Input<'_>) -> ParseResult<'_, &str> {
+    tag("/")(input)
+}
+
+#[tracing::instrument]
+pub fn double_quote(input: Input<'_>) -> ParseResult<'_, &str> {
+    let (input, foo) = tag(r#"""#)(input)?;
+    Ok((input, foo))
+}
+
+#[tracing::instrument]
+pub fn path(input: Input<'_>) -> ParseResult<'_, Path> {
+    let (input, _) = double_quote(input)?;
+    let (input, segments) = many1(path_segment_slash).recognize().parse(input)?;
+    let (input, _) = double_quote(input)?;
+    Ok((input, segments.into()))
 }
 
 #[tracing::instrument]
@@ -162,7 +206,7 @@ pub fn variable(input: Input<'_>) -> ParseResult<'_, Term> {
     ident.map(|ident| Term::Variable(ident)).parse(input)
 }
 
-const KEYWORDS: [&'static str; 2] = ["let", "in"];
+const KEYWORDS: [&'static str; 3] = ["let", "in", "import"];
 
 #[tracing::instrument]
 pub fn ident(input: Input<'_>) -> ParseResult<'_, SmolStr> {
@@ -191,6 +235,7 @@ mod tests {
                 $(
                     #[test]
                     fn [<test_parse_ $name>]() {
+                        let _guard = init_tracing();
                         assert_parse!($input, $output);
                     }
                 )*
@@ -225,6 +270,18 @@ mod tests {
     macro_rules! bind {
         ($name: ident = $val: expr) => {
             $crate::ast::Stmt::Bind(id!($name), $val.into())
+        };
+    }
+
+    macro_rules! path {
+        ($p: expr) => {
+            ::smol_str::SmolStr::from($p)
+        };
+    }
+
+    macro_rules! import {
+        ($p: expr) => {
+            $crate::ast::Stmt::Import(path!($p))
         };
     }
 
@@ -291,5 +348,12 @@ mod tests {
 
         // program
         basic_program                   :   program("foo = x; bar = y;") => Ok(("", vec![bind!(foo = var!(x)), bind!(bar = var!(y))]));
+
+        // path
+        basic_path                      :   path(r#""foo""#)             => Ok(("", path!("foo")));
+        path_slashes                    :   path("\"foo/bar/baz\"")      => Ok(("", path!("foo/bar/baz")));
+
+        // import
+        basic_import                    :   import("import \"foo/bar/baz/thing.txt\"") => Ok(("", import!("foo/bar/baz/thing.txt")));
     }
 }

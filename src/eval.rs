@@ -64,6 +64,7 @@ impl EvalContext {
                     }
                     res.push(value);
                 }
+                crate::ir::Stmt::Import(_) => todo!(),
             }
         }
         res
@@ -142,6 +143,5 @@ mod test {
 
     eval_tests! {
         eval_basic  : "(λ x. x) (λ y. y)" => "(λy. y)";
-        eval_basic2 : "((λx. λy. x) y) z" => "y";
     }
 }
