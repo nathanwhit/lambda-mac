@@ -10,23 +10,26 @@ use nom::character::complete::{alpha1, multispace1};
 use nom::combinator::eof;
 use nom::combinator::recognize;
 use nom::error::ParseError;
-use nom::multi::many0;
+use nom::error::VerboseError;
+use nom::multi::many1;
 use nom::multi::{fold_many1, many0_count};
 use nom::sequence::delimited;
 use nom::sequence::pair;
 use nom::IResult;
 use nom::Parser;
-use nom_supreme::error::ErrorTree;
 use nom_supreme::tag::complete::tag;
 use nom_supreme::tag::TagError;
+use nom_supreme::ParserExt;
 use smol_str::SmolStr;
 // use nom_supreme::ParserExt;
 
-type ParseResult<'a, O, E = ErrorTree<&'a str>> = IResult<&'a str, O, E>;
+type ParseResult<'a, O, E = VerboseError<&'a str>> = IResult<&'a str, O, E>;
 type Input<'a> = &'a str;
 
 pub fn program(input: Input<'_>) -> ParseResult<'_, Vec<Stmt>> {
-    many0(statement)(input)
+    many1(statement.context("statement"))
+        .context("program statements")
+        .parse(input)
 }
 
 fn chomp_newlines(input: Input<'_>) -> ParseResult<'_, usize> {
@@ -34,14 +37,19 @@ fn chomp_newlines(input: Input<'_>) -> ParseResult<'_, usize> {
 }
 
 pub fn statement(input: Input<'_>) -> ParseResult<'_, Stmt> {
-    let (input, stmt) = stmt(input)?;
-    let (input, _) = ws(alt((tag(";"), eof)))(input)?;
+    let (input, stmt) = stmt.context("stmt").parse(input)?;
+    let (input, _) =
+        ws(alt((tag(";").context("semicolon"), eof.context("eof")))
+            .context("either semicolon or end"))(input)?;
     let (input, _) = chomp_newlines(input)?;
     Ok((input, stmt))
 }
 
 pub fn stmt(input: Input<'_>) -> ParseResult<'_, Stmt> {
-    ws(alt((bind, term.map(Stmt::Expr))))(input)
+    ws(alt((
+        bind.context("binding"),
+        term.context("term").map(Stmt::Expr),
+    )))(input)
 }
 
 pub fn expr(input: Input<'_>) -> ParseResult<'_, Stmt> {

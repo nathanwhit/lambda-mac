@@ -1,4 +1,5 @@
 use lambda_mac::eval::EvalContext;
+use nom::{error::convert_error, Finish};
 use rustyline::Editor;
 use tracing::dispatcher::DefaultGuard;
 use tracing_subscriber::{prelude::*, EnvFilter, Registry};
@@ -23,7 +24,13 @@ fn main() -> rustyline::Result<()> {
             eval_ctx.print_globals();
             continue;
         }
-        let (_, stmts) = lambda_mac::parse::program(&line).unwrap();
+        let stmts = match lambda_mac::parse::program(&line).finish() {
+            Ok((_, stmts)) => stmts,
+            Err(e) => {
+                eprintln!("{}", convert_error(&*line, e));
+                continue;
+            }
+        };
         let lowered = name_ctx.lower_stmts(stmts);
         eval_ctx.load(lowered);
         eval_ctx.eval(true);
