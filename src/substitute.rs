@@ -15,7 +15,7 @@ impl Term {
         fn walk(term: Term, target: DebruijnIndex, outer: DebruijnIndex, subst: Term) -> Term {
             match term {
                 Term::Variable(idx, len) => {
-                    if idx == DebruijnIndex::new(target.depth() + outer.depth()) {
+                    if idx.depth() == target.depth() + outer.depth() {
                         tracing::debug!(?subst, ?outer, ?idx, "shifting in");
                         subst.shifted_in(outer)
                     } else {

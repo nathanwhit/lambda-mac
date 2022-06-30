@@ -128,11 +128,7 @@ impl BindingContext {
             Some(Binding {
                 name: _,
                 kind: BindingKind::Global(value),
-            }) => Some(
-                value
-                    .clone()
-                    .shifted_in(DebruijnIndex::new(idx.depth() + 1)),
-            ),
+            }) => Some(value.clone().shifted_in(idx.shifted_in())),
             _ => None,
         }
     }
@@ -310,13 +306,13 @@ pub(crate) mod test {
     lowering_tests! {
         basic_abs   :   term("λx. x")               => t!(x -> t!(0));
         basic_app   :   term("λx. x x")             => t!(x -> t!(t!(0) => t!(0)));
-        basic_var   :   term("x")                   => t!(0);
+        basic_var   :   term("x")                   => t!(2);
         nested_abs  :   term("λx. λy. x")           => t!(x -> t!(y -> t!(1)));
         app_abs     :   term("(λ x. x) (λ y. y)")   => t!(t!(x -> t!(0)) => t!(y -> t!(0)));
-        free_var    :   term("λx. x y")             => t!(x -> t!(t!(0) => t!(1)));
+        free_var    :   term("λx. x y")             => t!(x -> t!(t!(0) => t!(2)));
         shadowing   :   term("λx. λy. λx. x y")     => t!(x -> t!(y -> t!(x -> t!(t!(0) => t!(1)))));
 
-        thing       :   term("((λx. λy. x) y) z")   => t!(t!(t!(x -> t!(y -> t!(1))), t!(0)), t!(1))
+        thing       :   term("((λx. λy. x) y) z")   => t!(t!(t!(x -> t!(y -> t!(1))), t!(1)), t!(0));
     }
 
     printing_tests! {

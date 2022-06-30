@@ -23,31 +23,27 @@ impl DebruijnIndex {
     }
 
     #[must_use]
-    pub const fn shifted_in_from(self, outer_binder: DebruijnIndex) -> DebruijnIndex {
-        if self.within(outer_binder) {
-            DebruijnIndex::new(self.depth + outer_binder.depth)
-        } else {
-            self
-        }
+    pub const fn shifted_in_by(self, amount: DebruijnIndex) -> DebruijnIndex {
+        DebruijnIndex::new(self.depth + amount.depth)
     }
 
     #[must_use]
-    pub const fn shifted_out_to(self, outer_binder: DebruijnIndex) -> Option<DebruijnIndex> {
-        if self.within(outer_binder) {
+    pub const fn shifted_out_by(self, amount: DebruijnIndex) -> Option<DebruijnIndex> {
+        if self.within(amount) {
             None
         } else {
-            Some(DebruijnIndex::new(self.depth - outer_binder.depth))
+            Some(DebruijnIndex::new(self.depth - amount.depth))
         }
     }
 
     #[must_use]
     pub const fn shifted_out(self) -> Option<DebruijnIndex> {
-        self.shifted_out_to(DebruijnIndex::ONE)
+        self.shifted_out_by(DebruijnIndex::ONE)
     }
 
     #[must_use]
     pub const fn shifted_in(self) -> DebruijnIndex {
-        self.shifted_in_from(DebruijnIndex::ONE)
+        self.shifted_in_by(DebruijnIndex::ONE)
     }
 
     pub fn shift_in(&mut self) {

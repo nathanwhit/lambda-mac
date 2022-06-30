@@ -76,7 +76,11 @@ impl EvalContext {
                 }
                 Term::Variable(idx, _) => {
                     if let Some(val) = ctx.bindings.get_global(idx) {
-                        tracing::debug!("continuing with global");
+                        tracing::debug!(
+                            ?val,
+                            value = %ctx.bindings.print_term(&val),
+                            "continuing with global"
+                        );
                         return ControlFlow::Continue(val);
                     } else {
                         ControlFlow::Break(())

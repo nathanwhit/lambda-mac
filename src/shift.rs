@@ -1,9 +1,22 @@
+use std::ops::{Add, Sub};
+
 use crate::{debruijn::DebruijnIndex, ir::Term};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Direction {
     In,
     Out,
+}
+
+fn apply<A, B>(original: A, amount: B, direction: Direction) -> <A as Add<B>>::Output
+where
+    A: Sub<B>,
+    A: Add<B, Output = <A as Sub<B>>::Output>,
+{
+    match direction {
+        Direction::In => original + amount,
+        Direction::Out => original - amount,
+    }
 }
 
 impl Term {
@@ -25,15 +38,15 @@ impl Term {
             ),
             Term::Variable(idx, len) => {
                 if idx.within(outer_binder) {
-                    Term::Variable(idx, len + (amount.depth() as usize))
+                    Term::Variable(idx, apply(len, amount.depth() as usize, direction))
                 } else {
                     match direction {
                         Direction::In => Term::Variable(
-                            DebruijnIndex::new(idx.depth() + amount.depth()),
+                            idx.shifted_in_by(amount),
                             len + (amount.depth() as usize),
                         ),
                         Direction::Out => Term::Variable(
-                            idx.shifted_out_to(amount)?,
+                            idx.shifted_out_by(amount)?,
                             len - (amount.depth() as usize),
                         ),
                     }
