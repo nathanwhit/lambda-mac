@@ -1,5 +1,8 @@
 use std::ops::ControlFlow;
 
+use color_eyre::Result;
+use nom::{error::convert_error, Finish};
+
 use crate::{
     ast::Stmt,
     ir::{BindingContext, Term},
@@ -28,7 +31,7 @@ impl EvalContext {
         self.statements.extend(statements);
     }
     #[tracing::instrument]
-    pub fn eval(&mut self, print: bool) -> Vec<Term> {
+    pub fn eval(&mut self, print: bool) -> Result<Vec<Term>> {
         let mut res = Vec::new();
         let statements = std::mem::take(&mut self.statements);
         for stmt in statements {
@@ -53,10 +56,17 @@ impl EvalContext {
                     self.bindings.add_global(name.clone(), value.clone());
                     res.push(value);
                 }
-                Stmt::Import(_) => todo!(),
+                Stmt::Import(path) => {
+                    let input = std::fs::read_to_string(&*path)?;
+                    let (_, program) = crate::parse::program(&input).finish().map_err(|e| {
+                        color_eyre::eyre::eyre!("parse error: {}", convert_error(&*input, e))
+                    })?;
+                    self.load(program);
+                    self.eval(false)?;
+                }
             }
         }
-        res
+        Ok(res)
     }
 
     #[tracing::instrument(skip(self))]

@@ -26,7 +26,7 @@ enum Commands {
     Repl,
 }
 
-fn repl() -> rustyline::Result<()> {
+fn repl() -> color_eyre::Result<()> {
     let mut rl = Editor::<()>::new();
     let mut eval_ctx = EvalContext::new(vec![]);
     loop {
@@ -45,7 +45,7 @@ fn repl() -> rustyline::Result<()> {
             }
         };
         eval_ctx.load(stmts);
-        eval_ctx.eval(true);
+        eval_ctx.eval(true)?;
         rl.add_history_entry(line);
     }
 }
@@ -56,7 +56,7 @@ fn run(path: &str) -> color_eyre::Result<()> {
         .finish()
         .map_err(|e| color_eyre::eyre::eyre!("parse error: {}", convert_error(&*input, e)))?;
     let mut eval_ctx = EvalContext::new(program);
-    eval_ctx.eval(true);
+    eval_ctx.eval(true)?;
     Ok(())
 }
 
