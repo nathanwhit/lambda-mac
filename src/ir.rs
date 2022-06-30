@@ -9,12 +9,24 @@ pub type Ident = SmolStr;
 
 pub type Path = SmolStr;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Eq, Clone)]
 pub enum Term {
     Abstraction(Ident, Box<Term>),
     Application(Box<Term>, Box<Term>),
-    Variable(DebruijnIndex),
+    Variable(DebruijnIndex, usize),
     Let(Ident, Box<Term>, Box<Term>),
+}
+
+impl PartialEq for Term {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Abstraction(l0, l1), Self::Abstraction(r0, r1)) => l0 == r0 && l1 == r1,
+            (Self::Application(l0, l1), Self::Application(r0, r1)) => l0 == r0 && l1 == r1,
+            (Self::Variable(l0, _), Self::Variable(r0, _)) => l0 == r0,
+            (Self::Let(l0, l1, l2), Self::Let(r0, r1, r2)) => l0 == r0 && l1 == r1 && l2 == r2,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -24,104 +36,110 @@ pub enum Stmt {
     Import(Path),
 }
 
-#[derive(Clone, Debug)]
-pub struct Statement {
-    pub stmt: Stmt,
-    pub context: NamingContext,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum BindingKind {
     Free,
-    Global,
+    Global(Term),
+    Local,
 }
 
 #[derive(Clone, Debug)]
 pub struct Binding {
     name: Ident,
-    #[allow(dead_code)]
     kind: BindingKind,
 }
 
+impl Binding {
+    pub fn local(name: Ident) -> Self {
+        Self {
+            name,
+            kind: BindingKind::Local,
+        }
+    }
+    pub fn global(name: Ident, value: Term) -> Self {
+        Self {
+            name,
+            kind: BindingKind::Global(value),
+        }
+    }
+    pub fn free(name: Ident) -> Self {
+        Self {
+            name,
+            kind: BindingKind::Free,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
-pub struct NamingContext {
-    local_bindings: Vector<Ident>,
-    global_bindings: Vector<Binding>,
+pub struct BindingContext {
+    bindings: Vector<Binding>,
 }
 
 impl ast::Term {
-    pub fn lower(self, ctx: &mut NamingContext) -> Term {
+    pub fn lower(self, ctx: &mut BindingContext) -> Term {
         ctx.lower_term(self)
     }
 }
 
-impl NamingContext {
-    pub fn non_local(&self) -> Self {
-        Self {
-            local_bindings: Vector::new(),
-            global_bindings: self.global_bindings.clone(),
-        }
-    }
-    pub fn enter<T>(&mut self, func: impl FnOnce(&mut NamingContext) -> T) -> T {
-        let fresh = self.local_bindings.clone();
-        let local_bindings = mem::replace(&mut self.local_bindings, fresh);
+impl BindingContext {
+    pub fn enter<T>(&mut self, func: impl FnOnce(&mut BindingContext) -> T) -> T {
+        let fresh = self.bindings.clone();
+        let saved_bindings = mem::replace(&mut self.bindings, fresh);
         let ret = func(self);
-        self.local_bindings = local_bindings;
+        self.bindings = saved_bindings;
         ret
     }
 
     pub fn new() -> Self {
         Self {
-            local_bindings: Vector::new(),
-            global_bindings: Vector::new(),
+            bindings: Vector::new(),
         }
     }
 
     pub fn name_of(&self, idx: DebruijnIndex) -> Option<Ident> {
         let idx = idx.depth() as usize;
-        self.local_bindings
-            .iter()
-            .chain(self.global_bindings.iter().map(|b| &b.name))
-            .nth(idx)
-            .map(|s| s.clone())
+        self.bindings.get(idx).map(|b| b.name.clone())
     }
 
     pub fn index_of(&self, name: &str) -> Option<DebruijnIndex> {
-        self.local_bindings
+        self.bindings
             .iter()
-            .chain(self.global_bindings.iter().map(|b| &b.name))
             .enumerate()
-            .find_map(|(idx, n)| n.eq(name).then(|| DebruijnIndex::new(idx as u32)))
+            .find_map(|(idx, n)| n.name.eq(name).then(|| DebruijnIndex::new(idx as u32)))
     }
 
     pub fn add_local(&mut self, name: Ident) -> DebruijnIndex {
-        self.local_bindings.push_front(name);
-        DebruijnIndex::new(0)
+        self.bindings.push_front(Binding::local(name));
+        DebruijnIndex::INNERMOST
     }
 
-    pub fn add_global(&mut self, name: Ident) -> DebruijnIndex {
-        self.global_bindings.push_back(Binding {
-            name,
-            kind: BindingKind::Global,
-        });
-        DebruijnIndex::new((self.local_bindings.len() + self.global_bindings.len() - 1) as u32)
+    pub fn add_global(&mut self, name: Ident, value: Term) -> DebruijnIndex {
+        self.bindings.push_front(Binding::global(name, value));
+        DebruijnIndex::INNERMOST
     }
 
     pub fn add_free(&mut self, name: Ident) -> DebruijnIndex {
-        self.global_bindings.push_back(Binding {
-            name,
-            kind: BindingKind::Free,
-        });
-        DebruijnIndex::new((self.local_bindings.len() + self.global_bindings.len() - 1) as u32)
+        self.bindings.push_front(Binding::free(name));
+        DebruijnIndex::INNERMOST
     }
 
-    pub fn get_or_add_free(&mut self, name: &str) -> DebruijnIndex {
-        self.index_of(name)
-            .unwrap_or_else(|| self.add_free(name.into()))
+    pub fn get_global(&self, idx: DebruijnIndex) -> Option<Term> {
+        match self.bindings.get(idx.depth() as usize) {
+            Some(Binding {
+                name: _,
+                kind: BindingKind::Global(value),
+            }) => Some(
+                value
+                    .clone()
+                    .shifted_in(DebruijnIndex::new(idx.depth() + 1)),
+            ),
+            _ => None,
+        }
     }
 }
 
-impl NamingContext {
+impl BindingContext {
+    #[tracing::instrument(skip(self))]
     pub fn lower_term(&mut self, term: ast::Term) -> Term {
         match term {
             ast::Term::Abstraction(arg, body) => self.enter(|ctx| {
@@ -131,7 +149,10 @@ impl NamingContext {
             ast::Term::Application(a, b) => {
                 Term::Application(Box::new(self.lower_term(*a)), Box::new(self.lower_term(*b)))
             }
-            ast::Term::Variable(id) => Term::Variable(self.get_or_add_free(&id)),
+            ast::Term::Variable(id) => Term::Variable(
+                self.index_of(&*id).expect(&format!("unbound var {}", id)),
+                self.bindings.len(),
+            ),
             ast::Term::Let(id, value, body) => {
                 let value = self.lower_term(*value);
                 self.enter(|ctx| {
@@ -142,6 +163,7 @@ impl NamingContext {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub fn print_term(&mut self, term: &Term) -> String {
         match term {
             Term::Abstraction(arg, body) => self.enter(|ctx| {
@@ -150,10 +172,12 @@ impl NamingContext {
             }),
             Term::Application(a, b) => self
                 .enter(|ctx| format!("({} {})", ctx.print_term(&*a), ctx.print_term(&*b)).into()),
-            Term::Variable(idx) => self
-                .name_of(*idx)
-                .expect(&format!("unbound variable {idx:?}"))
-                .into(),
+            Term::Variable(idx, len) => {
+                assert_eq!(self.bindings.len(), *len);
+                self.name_of(*idx)
+                    .expect(&format!("unbound variable {idx:?}"))
+                    .into()
+            }
             Term::Let(id, value, body) => {
                 let value_print = self.print_term(&*value);
                 self.enter(|ctx| {
@@ -166,26 +190,7 @@ impl NamingContext {
     }
 }
 
-impl NamingContext {
-    pub fn lower_stmt(&mut self, stmt: ast::Stmt) -> Statement {
-        let stmt = match stmt {
-            ast::Stmt::Expr(e) => Stmt::Expr(self.lower_term(e)),
-            ast::Stmt::Bind(id, val) => {
-                self.add_global(id.clone());
-                Stmt::Bind(id, self.lower_term(val))
-            }
-            ast::Stmt::Import(path) => Stmt::Import(path),
-        };
-        Statement {
-            stmt,
-            context: self.non_local(),
-        }
-    }
-
-    pub fn lower_stmts(&mut self, stmts: impl IntoIterator<Item = ast::Stmt>) -> Vec<Statement> {
-        stmts.into_iter().map(|s| self.lower_stmt(s)).collect()
-    }
-
+impl BindingContext {
     pub fn print_stmt(&mut self, stmt: &Stmt) -> String {
         match stmt {
             Stmt::Expr(e) => self.print_term(e),
@@ -196,7 +201,7 @@ impl NamingContext {
 }
 
 impl Term {
-    pub fn print(&self, context: &mut NamingContext) -> String {
+    pub fn print(&self, context: &mut BindingContext) -> String {
         context.print_term(self)
     }
 
@@ -250,7 +255,7 @@ pub(crate) mod test {
             ::smol_str::SmolStr::from(stringify!($ident))
         };
         ($idx: expr) => {
-            $crate::ir::Term::Variable($crate::debruijn::DebruijnIndex::new($idx))
+            $crate::ir::Term::Variable($crate::debruijn::DebruijnIndex::new($idx), 0)
         };
         ($v: ident -> $b: expr) => {
             $crate::ir::Term::Abstraction(
@@ -272,7 +277,10 @@ pub(crate) mod test {
                 paste::paste! {
                     #[test]
                     fn [<test_lower_ $test>]() {
-                        let mut ctx = $crate::ir::NamingContext::new();
+                        let mut ctx = $crate::ir::BindingContext::new();
+                        ctx.add_free("x".into());
+                        ctx.add_free("y".into());
+                        ctx.add_free("z".into());
                         assert_lowers!(ctx; $a, $b);
                     }
                 }
@@ -286,7 +294,10 @@ pub(crate) mod test {
                 paste::paste! {
                     #[test]
                     fn [<test_print_ $test>]() {
-                        let mut ctx = $crate::ir::NamingContext::new();
+                        let mut ctx = $crate::ir::BindingContext::new();
+                        ctx.add_free("x".into());
+                        ctx.add_free("y".into());
+                        ctx.add_free("z".into());
                         assert_prints!(ctx; $a, $b);
                     }
                 }

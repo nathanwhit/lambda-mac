@@ -28,15 +28,14 @@ enum Commands {
 
 fn repl() -> rustyline::Result<()> {
     let mut rl = Editor::<()>::new();
-    let mut name_ctx = lambda_mac::ir::NamingContext::new();
     let mut eval_ctx = EvalContext::new(vec![]);
     loop {
         let line = rl.readline("> ")?;
-        if line.trim() == "print" {
-            eval_ctx.print_globals();
-            rl.add_history_entry(line);
-            continue;
-        }
+        // if line.trim() == "print" {
+        //     // eval_ctx.print_globals();
+        //     rl.add_history_entry(line);
+        //     continue;
+        // }
         let stmts = match lambda_mac::parse::program(&line).finish() {
             Ok((_, stmts)) => stmts,
             Err(e) => {
@@ -45,8 +44,7 @@ fn repl() -> rustyline::Result<()> {
                 continue;
             }
         };
-        let lowered = name_ctx.lower_stmts(stmts);
-        eval_ctx.load(lowered);
+        eval_ctx.load(stmts);
         eval_ctx.eval(true);
         rl.add_history_entry(line);
     }
@@ -54,12 +52,10 @@ fn repl() -> rustyline::Result<()> {
 
 fn run(path: &str) -> color_eyre::Result<()> {
     let input = std::fs::read_to_string(path)?;
-    let mut name_ctx = lambda_mac::ir::NamingContext::new();
     let (_, program) = lambda_mac::parse::program(&input)
         .finish()
         .map_err(|e| color_eyre::eyre::eyre!("parse error: {}", convert_error(&*input, e)))?;
-    let lowered = name_ctx.lower_stmts(program);
-    let mut eval_ctx = EvalContext::new(lowered);
+    let mut eval_ctx = EvalContext::new(program);
     eval_ctx.eval(true);
     Ok(())
 }

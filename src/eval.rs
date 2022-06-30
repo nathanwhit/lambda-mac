@@ -1,78 +1,67 @@
 use std::ops::ControlFlow;
 
-use im::HashMap;
-
 use crate::{
-    debruijn::DebruijnIndex,
-    ir::{Statement, Term},
+    ast::Stmt,
+    ir::{BindingContext, Term},
 };
 
 #[derive(Clone, Debug)]
 pub struct EvalContext {
-    statements: Vec<Statement>,
-    global_values: HashMap<DebruijnIndex, Term>,
+    statements: Vec<crate::ast::Stmt>,
+    bindings: BindingContext,
 }
 
 impl EvalContext {
-    pub fn new(statements: Vec<Statement>) -> Self {
+    pub fn new(statements: Vec<Stmt>) -> Self {
         Self {
             statements,
-            global_values: HashMap::new(),
+            bindings: BindingContext::new(),
         }
     }
     pub fn empty() -> Self {
         Self {
             statements: Vec::new(),
-            global_values: HashMap::new(),
+            bindings: BindingContext::new(),
         }
     }
-    pub fn print_globals(&self) {
-        println!("{:?}", self.global_values);
-    }
-    pub fn load(&mut self, statements: impl IntoIterator<Item = Statement>) {
+    pub fn load(&mut self, statements: impl IntoIterator<Item = Stmt>) {
         self.statements.extend(statements);
     }
+    #[tracing::instrument]
     pub fn eval(&mut self, print: bool) -> Vec<Term> {
         let mut res = Vec::new();
         let statements = std::mem::take(&mut self.statements);
-        for Statement { stmt, mut context } in statements {
+        for stmt in statements {
+            tracing::debug!(?stmt, "executing statement");
             match stmt {
-                crate::ir::Stmt::Expr(term) => {
+                Stmt::Expr(term) => {
+                    let term = term.lower(&mut self.bindings);
+                    tracing::debug!(?self.bindings, "evaluating expr {}", self.bindings.print_term(&term));
                     let res = self.eval_term(term.clone());
-                    tracing::debug!(?context, ?res, "evaluating expr");
+                    tracing::debug!("evaluated: {}", self.bindings.print_term(&res));
                     if print {
-                        println!(
-                            "{}",
-                            // context.print_term(&term),
-                            context.print_term(&res)
-                        );
+                        println!("{}", self.bindings.print_term(&res));
                     }
                 }
-                crate::ir::Stmt::Bind(name, expr) => {
-                    let idx = context
-                        .index_of(&name)
-                        .expect(&format!("unbound ident {name:?}"));
-                    let value = self.eval_term(expr.clone());
-                    tracing::debug!("{name} = {}", context.print_term(&value));
-                    self.global_values.insert(idx, value.clone());
+                Stmt::Bind(name, expr) => {
+                    let expr = expr.lower(&mut self.bindings);
+                    let value = self.eval_term(expr);
+                    tracing::debug!("{name} = {}", self.bindings.print_term(&value));
                     if print {
-                        println!(
-                            "{name} = {}",
-                            // context.print_term(&expr),
-                            context.print_term(&value)
-                        );
+                        println!("{name} = {}", self.bindings.print_term(&value));
                     }
+                    self.bindings.add_global(name.clone(), value.clone());
                     res.push(value);
                 }
-                crate::ir::Stmt::Import(_) => todo!(),
+                Stmt::Import(_) => todo!(),
             }
         }
         res
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     pub fn eval_term(&mut self, term: Term) -> Term {
-        #[tracing::instrument]
+        #[tracing::instrument(skip(ctx))]
         fn eval1(ctx: &mut EvalContext, term: Term) -> ControlFlow<(), Term> {
             match term {
                 Term::Application(lhs, rhs) if lhs.is_value() && rhs.is_value() => {
@@ -80,16 +69,15 @@ impl EvalContext {
                     ControlFlow::Continue(body.substituted(*rhs))
                 }
                 Term::Application(lhs, rhs) if lhs.is_value() => {
-                    tracing::debug!("here!");
                     ControlFlow::Continue(Term::Application(lhs, Box::new(eval1(ctx, *rhs)?)))
                 }
                 Term::Application(lhs, rhs) => {
                     ControlFlow::Continue(Term::Application(Box::new(eval1(ctx, *lhs)?), rhs))
                 }
-                Term::Variable(idx) => {
-                    if let Some(val) = ctx.global_values.get(&idx) {
+                Term::Variable(idx, _) => {
+                    if let Some(val) = ctx.bindings.get_global(idx) {
                         tracing::debug!("continuing with global");
-                        return ControlFlow::Continue(val.clone());
+                        return ControlFlow::Continue(val);
                     } else {
                         ControlFlow::Break(())
                     }
@@ -130,7 +118,7 @@ mod test {
                 $(
                     #[test]
                     fn [<test_eval_ $name>]() {
-                        let mut ctx = $crate::ir::NamingContext::new();
+                        let mut ctx = $crate::ir::BindingContext::new();
                         let term_parsed = $crate::parse::term($tm).unwrap().1.lower(&mut ctx);
                         let mut eval_ctx = $crate::eval::EvalContext::new(vec![]);
 
@@ -143,5 +131,6 @@ mod test {
 
     eval_tests! {
         eval_basic  : "(λ x. x) (λ y. y)" => "(λy. y)";
+        and         : "(λ b. λ c. b c (λt. λf. t)) (λt. λf. t) (λt. λf. f)" => "(λt. (λf. f))"
     }
 }
