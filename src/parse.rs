@@ -4,6 +4,7 @@ use crate::ast::Term;
 use crate::syntax::Fragment;
 
 use nom::branch::alt;
+use nom::bytes::complete::is_not;
 use nom::bytes::complete::take_till;
 use nom::character::complete::alphanumeric1;
 use nom::character::complete::multispace0;
@@ -13,6 +14,7 @@ use nom::character::complete::space1;
 use nom::character::complete::{alpha1, multispace1};
 use nom::combinator::eof;
 use nom::combinator::recognize;
+use nom::combinator::value;
 use nom::combinator::verify;
 use nom::error::ParseError;
 use nom::error::VerboseError;
@@ -41,11 +43,19 @@ fn chomp_newlines(input: Input<'_>) -> ParseResult<'_, usize> {
     many0_count(newline)(input)
 }
 
+pub fn comment(input: Input<'_>) -> ParseResult<'_, ()> {
+    value(
+        (), // Output is thrown away.
+        pair(tag("//"), is_not("\n\r")),
+    )(input)
+}
+
 pub fn statement(input: Input<'_>) -> ParseResult<'_, Stmt> {
     let (input, stmt) = stmt.context("stmt").parse(input)?;
     let (input, _) =
         ws(alt((tag(";").context("semicolon"), eof.context("eof")))
             .context("either semicolon or end"))(input)?;
+    let (input, _) = comment.opt().parse(input)?;
     let (input, _) = chomp_newlines(input)?;
     Ok((input, stmt))
 }
