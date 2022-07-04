@@ -1,4 +1,7 @@
+use std::ops::Not;
+
 use clap::{Parser, Subcommand};
+use color_eyre::eyre::eyre;
 use lambda_mac::{eval::EvalContext, expand::Expander};
 use nom::{error::convert_error, Finish};
 use rustyline::Editor;
@@ -48,9 +51,12 @@ fn repl() -> color_eyre::Result<()> {
 
 fn run(path: &str) -> color_eyre::Result<()> {
     let input = std::fs::read_to_string(path)?;
-    let (_, program) = lambda_mac::parse::program(&input)
+    let (input, program) = lambda_mac::parse::program(&input)
         .finish()
-        .map_err(|e| color_eyre::eyre::eyre!("parse error: {}", convert_error(&*input, e)))?;
+        .map_err(|e| eyre!("parse error: {}", convert_error(&*input, e)))?;
+    if input.trim().is_empty().not() {
+        return Err(eyre!("input remaining: {input}"));
+    }
     let program = Expander::new(program).expand()?;
     let mut eval_ctx = EvalContext::new(program);
     eval_ctx.eval(true)?;
