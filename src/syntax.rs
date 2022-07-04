@@ -1,14 +1,40 @@
-use std::{collections::BTreeSet, sync::atomic::AtomicU64};
+use std::{collections::BTreeSet, fmt::Display, sync::atomic::AtomicU64};
 
 use crate::ast::{self, AstStmt, AstTerm, Ident, Stmt, Term};
 
 pub type SyntaxTerm = AstTerm<Syntax>;
 pub type SyntaxStmt = AstStmt<Syntax>;
 
+impl Display for SyntaxTerm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AstTerm::Abstraction(arg, body) => write!(f, "(λ {arg}. {body})"),
+            AstTerm::Application(lhs, rhs) => write!(f, "({lhs} {rhs})"),
+            AstTerm::Variable(var) => write!(f, "{var}"),
+            AstTerm::Let(bind, val, body) => write!(f, "let {bind} = {val} in {body}"),
+            AstTerm::MacroDef(arg, body) => write!(f, "{arg}, {body}"),
+        }
+    }
+}
+
+impl Display for SyntaxFragment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AstFragment::Term(term) => write!(f, "{term}"),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Hash, PartialOrd, Ord)]
 pub struct Syntax {
     ident: Ident,
     scopes: BTreeSet<Scope>,
+}
+
+impl Display for Syntax {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.ident)
+    }
 }
 
 impl From<Ident> for Syntax {
