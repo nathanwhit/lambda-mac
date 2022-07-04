@@ -1,0 +1,4 @@
+foo = λx. x;
+id = macro y. { λ x. y };
+z = λp. p;
+bar = (id foo) z;

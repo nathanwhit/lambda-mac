@@ -156,6 +156,7 @@ impl BindingContext {
                     Term::Let(id, Box::new(value), Box::new(ctx.lower_term(*body)))
                 })
             }
+            ast::Term::MacroDef(..) => panic!("macro definitions should be erased before lowering"),
         }
     }
 

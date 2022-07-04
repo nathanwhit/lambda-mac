@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use lambda_mac::eval::EvalContext;
+use lambda_mac::{eval::EvalContext, expand::Expander};
 use nom::{error::convert_error, Finish};
 use rustyline::Editor;
 use tracing::dispatcher::DefaultGuard;
@@ -31,11 +31,6 @@ fn repl() -> color_eyre::Result<()> {
     let mut eval_ctx = EvalContext::new(vec![]);
     loop {
         let line = rl.readline("> ")?;
-        // if line.trim() == "print" {
-        //     // eval_ctx.print_globals();
-        //     rl.add_history_entry(line);
-        //     continue;
-        // }
         let stmts = match lambda_mac::parse::program(&line).finish() {
             Ok((_, stmts)) => stmts,
             Err(e) => {
@@ -44,7 +39,8 @@ fn repl() -> color_eyre::Result<()> {
                 continue;
             }
         };
-        eval_ctx.load(stmts);
+        let program = Expander::new(stmts).expand()?;
+        eval_ctx.load(program);
         eval_ctx.eval(true)?;
         rl.add_history_entry(line);
     }
@@ -55,6 +51,7 @@ fn run(path: &str) -> color_eyre::Result<()> {
     let (_, program) = lambda_mac::parse::program(&input)
         .finish()
         .map_err(|e| color_eyre::eyre::eyre!("parse error: {}", convert_error(&*input, e)))?;
+    let program = Expander::new(program).expand()?;
     let mut eval_ctx = EvalContext::new(program);
     eval_ctx.eval(true)?;
     Ok(())

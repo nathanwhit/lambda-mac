@@ -1,6 +1,7 @@
 use crate::ast::Path;
 use crate::ast::Stmt;
 use crate::ast::Term;
+use crate::syntax::Fragment;
 
 use nom::branch::alt;
 use nom::bytes::complete::take_till;
@@ -114,6 +115,7 @@ pub fn path(input: Input<'_>) -> ParseResult<'_, Path> {
 pub fn term(input: Input<'_>) -> ParseResult<'_, Term> {
     ws(alt((
         let_term.context("let"),
+        macro_def,
         abstraction,
         application,
         variable,
@@ -168,6 +170,20 @@ pub fn atomic_term(input: Input<'_>) -> ParseResult<'_, Term> {
     )))(input)
 }
 
+pub fn macro_def(input: Input<'_>) -> ParseResult<'_, Term> {
+    let (input, _) = tag("macro")(input)?;
+    let (input, _) = multispace1(input)?;
+    let (input, arg) = ident(input)?;
+    let (input, _) = ws(tag("."))(input)?;
+    let (input, body) = delimited(tag("{"), fragment, tag("}"))(input)?;
+    Ok((input, Term::MacroDef(arg, Box::new(body))))
+}
+
+pub fn fragment(input: Input<'_>) -> ParseResult<'_, Fragment> {
+    let (input, term) = term(input)?;
+    Ok((input, Fragment::Term(term)))
+}
+
 #[tracing::instrument]
 pub fn abstraction(input: Input<'_>) -> ParseResult<'_, Term> {
     let arg = ident;
@@ -206,7 +222,7 @@ pub fn variable(input: Input<'_>) -> ParseResult<'_, Term> {
     ident.map(|ident| Term::Variable(ident)).parse(input)
 }
 
-const KEYWORDS: [&'static str; 3] = ["let", "in", "import"];
+const KEYWORDS: [&'static str; 4] = ["let", "in", "import", "macro"];
 
 #[tracing::instrument]
 pub fn ident(input: Input<'_>) -> ParseResult<'_, SmolStr> {

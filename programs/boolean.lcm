@@ -1,0 +1,15 @@
+tru = λ t. λf. t;
+fls = λ t. λf. f;
+test = λ l. λ m. λ n. l m n;
+and = λ b. λ c. b c fls;
+or = λ b. λ c. b tru c;
+
+and tru tru;
+and tru fls;
+and fls tru;
+and fls fls;
+
+or tru fls;
+or tru tru;
+or fls tru;
+or fls fls;
