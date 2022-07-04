@@ -332,3 +332,98 @@ impl ExpansionContext {
         }))
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::parse::program;
+
+    use super::*;
+    use maplit::btreeset as s;
+    use tracing::dispatcher::DefaultGuard;
+    use tracing_subscriber::{prelude::*, EnvFilter, Registry};
+    use tracing_tree::HierarchicalLayer;
+
+    #[derive(Clone)]
+    struct Var {
+        syntax: Syntax,
+        binding: Binding,
+    }
+
+    impl From<u64> for Scope {
+        fn from(id: u64) -> Self {
+            Scope::with_id(id)
+        }
+    }
+
+    fn syntax<I, S>(id: &str, scopes: I) -> Syntax
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<Scope>,
+    {
+        Syntax::new(id.into(), scopes.into_iter().map(Into::into).collect())
+    }
+
+    fn bind() -> Binding {
+        Binding::new()
+    }
+
+    impl ExpansionContext {
+        fn add_var(&mut self, var: Var) {
+            self.add_binding(var.syntax, var.binding)
+        }
+
+        fn add_vars(&mut self, vars: impl IntoIterator<Item = Var>) {
+            for var in vars {
+                self.add_var(var);
+            }
+        }
+    }
+
+    fn var<I, S>(id: &str, scopes: I) -> Var
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<Scope>,
+    {
+        Var {
+            syntax: syntax(id, scopes),
+            binding: bind(),
+        }
+    }
+
+    impl ExpansionContext {
+        fn with_vars(vars: impl IntoIterator<Item = Var>) -> Self {
+            let mut ctx = ExpansionContext::new();
+            ctx.add_vars(vars);
+            ctx
+        }
+    }
+
+    #[allow(dead_code)]
+    fn init_tracing() -> DefaultGuard {
+        let subscriber = Registry::default()
+            .with(EnvFilter::from_env("RUST_LOG"))
+            .with(HierarchicalLayer::new(2).with_indent_lines(true));
+        tracing::subscriber::set_default(subscriber)
+    }
+
+    #[test]
+    fn resolve_works() {
+        let _guard = init_tracing();
+
+        let a = var("a", s! { 0, 1, 2 });
+        let b = var("b", s! { 0, 1, 2 });
+        let a_2 = var("a", s! { 0, 1, 2, 3 });
+
+        let context = ExpansionContext::with_vars([a.clone(), b.clone(), a_2.clone()]);
+
+        let new_a = syntax("a", s! { 0, 1, 2, 3, 4 });
+        assert_eq!(context.resolve(&new_a).unwrap().unwrap(), a_2.binding);
+    }
+
+    #[test]
+    fn expand_term_works() {
+        let input = "λx. x";
+        let mut expander = Expander::new(program(input).unwrap().1);
+        expander.expand().unwrap();
+    }
+}

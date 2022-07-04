@@ -19,3 +19,7 @@ smol_str = "0.1.23"
 tracing = { version = "0.1.35", features = ["attributes"] }
 tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
 tracing-tree = "0.2.1"
+
+[dev-dependencies]
+extend = "1.1.2"
+maplit = "1.0.2"
