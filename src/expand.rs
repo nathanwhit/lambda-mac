@@ -1,4 +1,4 @@
-use std::{fmt::Debug, ops::Not, sync::atomic::AtomicU64};
+use std::{fmt::Debug, mem, ops::Not, sync::atomic::AtomicU64};
 
 use crate::{
     ast::Stmt,
@@ -8,6 +8,7 @@ use crate::{
 };
 use color_eyre::Result;
 use im::HashMap;
+use tracing::instrument;
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 struct Binding {
@@ -36,15 +37,12 @@ impl Expander {
         }
     }
 
-    pub fn expand(self) -> Result<Vec<Stmt>> {
-        let Self {
-            program,
-            mut context,
-        } = self;
+    pub fn expand(&mut self) -> Result<Vec<Stmt>> {
+        let program = mem::take(&mut self.program);
         let mut output = Vec::new();
         for stmt in program {
             tracing::debug!(?stmt, "expanding statment");
-            let result = context.expand_stmt(stmt)?;
+            let result = self.context.expand_stmt(stmt)?;
             if let Some(stmt) = result {
                 output.push(stmt);
             }
@@ -84,6 +82,11 @@ macro_rules! try_opt {
     };
 }
 
+impl Default for ExpansionContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl ExpansionContext {
     pub fn new() -> Self {
         Self {
@@ -106,15 +109,21 @@ impl ExpansionContext {
             to.add_scope(scope.clone());
         }
     }
+    #[instrument(skip(self))]
     fn add_binding(&mut self, id: Syntax, binding: Binding) {
         self.bindings.insert(id, binding);
     }
-    fn resolve(&mut self, id: &Syntax) -> Result<Option<Binding>> {
+    #[instrument(ret)]
+    fn resolve(&self, var: &Syntax) -> Result<Option<Binding>> {
         let candidates: Vec<_> = self
             .bindings
             .keys()
-            .filter(|&can| can.ident() == id.ident() && can.subset_of(&id))
+            .filter(|&can| {
+                tracing::trace!(?can, "finding");
+                dbg!(can.ident() == var.ident()) && dbg!(can.subset_of(&var))
+            })
             .collect();
+        tracing::trace!(?candidates, "Got candidates");
         let best = if let Some(&best) = candidates.iter().max_by_key(|&&k| k.num_scopes()) {
             best
         } else {
@@ -125,7 +134,7 @@ impl ExpansionContext {
             .into_iter()
             .any(|cand| cand.subset_of(best).not())
         {
-            return Err(color_eyre::eyre::eyre!("ambiguous: {id:?}"));
+            return Err(color_eyre::eyre::eyre!("ambiguous: {var:?}"));
         }
 
         Ok(Some(
@@ -136,23 +145,26 @@ impl ExpansionContext {
         ))
     }
 
-    #[tracing::instrument]
+    #[instrument(skip(self))]
     pub fn expand_stmt(&mut self, mut stmt: SyntaxStmt) -> Result<Option<SyntaxStmt>> {
         self.apply_global_scopes(&mut stmt);
         Ok(Some(match stmt {
             crate::ast::AstStmt::Expr(e) => SyntaxStmt::Expr(try_opt!(self.expand_term(e)?)),
             crate::ast::AstStmt::Bind(mut id, SyntaxTerm::MacroDef(mut arg, mut body)) => {
+                tracing::debug!("here");
                 let scope = Scope::new();
+                let mac_bind = Binding::new();
                 id.add_scope(scope.clone());
-                self.add_binding(id.clone(), Binding::new());
                 self.add_global_scope(scope);
+                self.add_binding(id.clone(), mac_bind.clone());
 
                 let scope = Scope::new();
                 arg.add_scope(scope.clone());
                 body.add_scope(scope);
-                let binding = Binding::new();
-                self.add_binding(id, binding.clone());
-                self.macros.insert(binding, MacroDef { arg, body });
+                self.add_binding(arg.clone(), Binding::new());
+
+                self.macros.insert(mac_bind, MacroDef { arg, body });
+
                 return Ok(None);
             }
             crate::ast::AstStmt::Bind(mut id, value) => {
@@ -161,15 +173,17 @@ impl ExpansionContext {
                 self.add_binding(id.clone(), Binding::new());
                 self.add_global_scope(scope);
 
-                let scope = Scope::new();
-                id.add_scope(scope);
-                self.add_binding(id.clone(), Binding::new());
                 SyntaxStmt::Bind(id, try_opt!(self.expand_term(value)?))
             }
             crate::ast::AstStmt::Import(path) => SyntaxStmt::Import(path),
         }))
     }
 
+    fn variable_eq(&self, var1: &Syntax, var2: &Syntax) -> Result<bool> {
+        Ok(self.resolve(var1)? == self.resolve(var2)?)
+    }
+
+    #[instrument(skip(self))]
     fn replace_term(
         &mut self,
         mut term: SyntaxTerm,
@@ -179,6 +193,17 @@ impl ExpansionContext {
         self.apply_global_scopes(&mut term);
         Ok(match term {
             crate::ast::AstTerm::Abstraction(arg, body) => {
+                // TODO: clean this up
+                let arg = if self.variable_eq(&arg, &var)? {
+                    if let SyntaxTerm::Variable(v) = replacement.clone() {
+                        tracing::debug!(?v, "replacing arg");
+                        v
+                    } else {
+                        arg
+                    }
+                } else {
+                    arg
+                };
                 SyntaxTerm::Abstraction(arg, Box::new(self.replace_term(*body, var, replacement)?))
             }
             crate::ast::AstTerm::Application(lhs, rhs) => {
@@ -187,9 +212,8 @@ impl ExpansionContext {
                 SyntaxTerm::Application(Box::new(lhs), Box::new(rhs))
             }
             crate::ast::AstTerm::Variable(v) => {
-                let v_binding = self.resolve(&v)?;
-                let var_binding = self.resolve(&var)?;
-                if v_binding == var_binding {
+                if self.variable_eq(&v, &var)? {
+                    tracing::debug!(?replacement, "replacing variable");
                     replacement
                 } else {
                     SyntaxTerm::Variable(v)
@@ -204,6 +228,7 @@ impl ExpansionContext {
         })
     }
 
+    #[instrument(skip(self))]
     fn replace_fragment(
         &mut self,
         fragment: SyntaxFragment,
@@ -215,12 +240,16 @@ impl ExpansionContext {
         }
     }
 
-    #[tracing::instrument]
-    fn apply_macro(&mut self, def: MacroDef, rhs: SyntaxTerm) -> Result<SyntaxTerm> {
-        self.replace_fragment(*def.body, def.arg, rhs)
-        // def.body
+    #[instrument(skip(self))]
+    fn apply_macro(&mut self, def: MacroDef, mut rhs: SyntaxTerm) -> Result<SyntaxTerm> {
+        let intro_scope = Scope::new();
+        rhs.add_scope(intro_scope.clone());
+        let mut replaced = self.replace_fragment(*def.body, def.arg, rhs)?;
+        replaced.flip_scope(intro_scope);
+        Ok(replaced)
     }
 
+    #[instrument(skip(self))]
     fn expand_term_shallow(&mut self, term: SyntaxTerm) -> Result<Option<SyntaxTerm>> {
         Ok(Some(match term {
             SyntaxTerm::Application(lhs, rhs) => match *lhs {
@@ -236,6 +265,7 @@ impl ExpansionContext {
                     let scope = Scope::new();
                     arg.add_scope(scope.clone());
                     body.add_scope(scope);
+                    self.add_binding(arg.clone(), Binding::new());
                     self.apply_macro(MacroDef { arg, body }, *rhs)?
                 }
                 lhs => SyntaxTerm::Application(Box::new(lhs), rhs),
@@ -244,10 +274,11 @@ impl ExpansionContext {
         }))
     }
 
-    #[tracing::instrument]
+    #[instrument(skip(self))]
     pub fn expand_term(&mut self, term: SyntaxTerm) -> Result<Option<SyntaxTerm>> {
         Ok(Some(match term {
             SyntaxTerm::Abstraction(mut id, mut body) => {
+                tracing::debug!("expanding abstraction");
                 let scope = Scope::new();
                 id.add_scope(scope.clone());
                 body.add_scope(scope);
@@ -256,18 +287,23 @@ impl ExpansionContext {
             }
             SyntaxTerm::Application(lhs, rhs) => match *lhs {
                 SyntaxTerm::Variable(var) => {
+                    tracing::debug!(?var, "expanding application of variable");
                     let binding = self
                         .resolve(&var)?
                         .expect(&format!("failed to resolve {var:?}"));
                     if let Some(mac) = self.macros.get(&binding).cloned() {
+                        tracing::debug!("its a macro, applying");
                         self.apply_macro(mac, *rhs)?
                     } else {
+                        tracing::debug!("non macro application");
                         SyntaxTerm::Application(Box::new(SyntaxTerm::Variable(var)), rhs)
                     }
                 }
                 lhs => {
+                    tracing::debug!("expanding application");
                     let lhs = try_opt!(self.expand_term(lhs)?);
                     let rhs = try_opt!(self.expand_term(*rhs)?);
+                    tracing::trace!(%lhs, %rhs, "expanded application");
                     try_opt!(self.expand_term_shallow(SyntaxTerm::Application(
                         Box::new(lhs),
                         Box::new(rhs),
@@ -290,6 +326,7 @@ impl ExpansionContext {
                 let scope = Scope::new();
                 arg.add_scope(scope.clone());
                 body.add_scope(scope);
+                self.add_binding(arg.clone(), Binding::new());
                 SyntaxTerm::MacroDef(arg, body)
             }
         }))
