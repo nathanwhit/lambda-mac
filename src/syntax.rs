@@ -47,6 +47,9 @@ impl From<Ident> for Syntax {
 }
 
 impl Syntax {
+    pub fn new(ident: Ident, scopes: BTreeSet<Scope>) -> Self {
+        Self { ident, scopes }
+    }
     pub fn ident(&self) -> Ident {
         self.ident.clone()
     }
@@ -349,5 +352,9 @@ impl Scope {
         Self {
             id: ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         }
+    }
+
+    pub fn with_id(id: u64) -> Self {
+        Self { id }
     }
 }
