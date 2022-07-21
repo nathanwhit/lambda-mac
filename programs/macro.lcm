@@ -1,4 +1,8 @@
-foo = λx. x;
-id = macro y. { λ x. y };
-z = λp. p;
-bar = (id foo) z;
+thunk = macro y. { (λ x. y) };
+thunked_id = thunk (λ y. y);
+
+callthunk = macro t. { (t (λ x. x)) };
+
+tru = λt. λf. t;
+
+(callthunk thunked_id) tru;
